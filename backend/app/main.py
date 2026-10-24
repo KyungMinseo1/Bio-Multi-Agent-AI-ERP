@@ -80,88 +80,71 @@ def email_outbox(case_id: str, user=Depends(approver), db=Depends(get_db)):
         .order_by(OutboundEmail.created_at.desc())
         .limit(50)
     ).all()
-    return [{
-        "id": row.id, "case_id": row.case_id, "vendor_id": row.vendor_id,
-        "vendor_name": row.vendor_name, "sender": row.sender, "recipient": row.recipient,
-        "subject": row.subject, "status": row.status, "message_id": row.message_id,
-        "error_code": row.error_code, "created_at": utc_iso(row.created_at),
-    } for row in rows]
+    from .services.quote_requests import view
+    return [view(row) for row in rows]
 
 
 @api.post("/mail/quote-requests")
-def send_quote_request(
-    body: QuoteEmailInput,
-    idempotency_key: str = Header(..., alias="Idempotency-Key"),
-    user=Depends(approver),
-    db=Depends(get_db),
-):
-    if len(idempotency_key) < 16 or len(idempotency_key) > 200:
-        raise HTTPException(422, "유효한 Idempotency-Key가 필요합니다.")
-    config = mail_configuration()
-    if not config.configured:
-        raise HTTPException(503, detail={"code": "mail_not_configured", "message": "서버 SMTP 설정이 필요합니다."})
-    try:
-        sender = validate_email_address(body.sender_email)
-        validate_email_address(body.recipient_email)
-        if sender not in config.allowed_senders:
-            raise ValueError("발신 주소가 서버 허용 목록에 없습니다.")
-        if "\r" in body.subject or "\n" in body.subject:
-            raise ValueError("제목에 줄바꿈을 넣을 수 없습니다.")
-        for line in body.schedule:
-            from datetime import date
-            date.fromisoformat(line.needed_date)
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from None
+async def send_quote_request(body: QuoteEmailInput, idempotency_key: str = Header(..., alias="Idempotency-Key"), user=Depends(approver), db=Depends(get_db)):
+    from .services.quote_requests import dispatch
+    return await dispatch(db, body, idempotency_key, user)
 
-    prior = db.scalar(select(OutboundEmail).where(OutboundEmail.idempotency_key == idempotency_key))
-    if prior:
-        if prior.status == "sent":
-            return {"id": prior.id, "status": prior.status, "message_id": prior.message_id, "created_at": utc_iso(prior.created_at), "already_sent": True}
-        raise HTTPException(409, detail={"code": "mail_request_exists", "message": "같은 발송 요청이 이미 접수되었습니다. 발송 이력을 확인하세요.", "status": prior.status})
 
-    delivery = OutboundEmail(
-        id=uid(), idempotency_key=idempotency_key, case_id=body.case_id,
-        vendor_id=body.vendor_id, vendor_name=body.vendor_name, actor_id=user.id,
-        sender=sender, recipient=body.recipient_email.strip().lower(), subject=body.subject.strip(),
-        status="sending", created_at=now(), updated_at=now(),
-    )
-    db.add(delivery)
+@api.get("/mail/mcp/status")
+async def gmail_mcp_status(user=Depends(approver)):
+    from .services.gmail_mcp import connection_status
     try:
+        return await connection_status(mail_configuration().default_sender)
+    except MailConfigurationError as exc:
+        raise HTTPException(503, str(exc)) from None
+
+
+@api.post("/mail/outbox/{dispatch_id}/sync")
+async def gmail_reply_sync(dispatch_id: str, user=Depends(approver), db=Depends(get_db)):
+    from .services.gmail_mcp import read_replies
+    delivery = db.get(OutboundEmail, dispatch_id)
+    if not delivery or delivery.delivery_mode != "gmail_mcp" or delivery.status not in {"sent", "replied"}:
+        raise HTTPException(422, "발송 완료된 Gmail MCP 요청을 선택하세요.")
+    try:
+        delivery.responses = await read_replies(delivery)
         db.commit()
-    except IntegrityError:
-        db.rollback()
-        prior = db.scalar(select(OutboundEmail).where(OutboundEmail.idempotency_key == idempotency_key))
-        if prior and prior.status == "sent":
-            return {"id": prior.id, "status": prior.status, "message_id": prior.message_id, "created_at": utc_iso(prior.created_at), "already_sent": True}
-        raise HTTPException(409, detail={"code": "mail_request_exists", "message": "같은 발송 요청이 이미 접수되었습니다. 발송 이력을 확인하세요."}) from None
+        return {"responses": delivery.responses}
+    except MailConfigurationError as exc:
+        raise HTTPException(503, str(exc)) from None
 
-    message_id = make_msgid(domain="bioflow.local")
-    try:
-        sent_message_id, attachment_name = send_quote_email(body, message_id)
-    except (MailConfigurationError, MailDeliveryError, ValueError) as exc:
-        delivery.status = "failed"
-        delivery.error_code = "configuration" if isinstance(exc, MailConfigurationError) else type(exc).__name__
-        delivery.updated_at = now()
-        db.add(AuditEvent(scenario_id=body.case_id, actor=user.email, action="견적 메일 발송 실패", before=None,
-                          after={"dispatch_id": delivery.id, "vendor_id": body.vendor_id, "recipient": delivery.recipient,
-                                 "error_code": delivery.error_code}))
-        db.commit()
-        if isinstance(exc, MailConfigurationError):
-            raise HTTPException(503, detail={"code": "mail_not_configured", "message": "발신 주소 또는 SMTP 설정을 확인하세요."}) from None
-        if isinstance(exc, ValueError):
-            raise HTTPException(422, str(exc)) from None
-        raise HTTPException(502, detail={"code": "mail_delivery_failed", "message": "메일 서버가 발송을 완료하지 못했습니다. 발송 이력 상태를 확인하세요."}) from None
 
-    delivery.status = "sent"
-    delivery.message_id = sent_message_id
-    delivery.updated_at = now()
-    db.add(AuditEvent(scenario_id=body.case_id, actor=user.email, action="견적 요청 메일 발송", before=None,
-                      after={"dispatch_id": delivery.id, "vendor_id": body.vendor_id, "vendor_name": body.vendor_name,
-                             "sender": sender, "recipient": delivery.recipient, "subject": delivery.subject,
-                             "attachment": attachment_name, "message_id": sent_message_id}))
-    db.commit()
-    return {"id": delivery.id, "status": delivery.status, "message_id": sent_message_id,
-            "attachment_name": attachment_name, "created_at": utc_iso(delivery.created_at), "already_sent": False}
+@api.post("/mail/outbox/{dispatch_id}/confirm-reply")
+def confirm_quote_reply(dispatch_id: str, body: dict, user=Depends(approver), db=Depends(get_db)):
+    from .services import workspace
+    delivery = db.get(OutboundEmail, dispatch_id)
+    message = next((m for m in (delivery.responses or []) if m['id'] == body.get('message_id')), None) if delivery else None
+    row = db.get(Scenario, workspace.WORKSPACE)
+    if not delivery or not message or not row or row.revision != body.get('expected_revision'):
+        raise HTTPException(409, "검증된 메일 회신과 현재 업무 버전을 확인하세요.")
+    if row.data['_workflow']['data']['revision'] != (delivery.payload or {}).get('approved_data_revision'):
+        raise HTTPException(409, '견적 요청 이후 원본이 변경됐습니다. 최신 조건으로 다시 요청하세요.')
+    value = workspace.execute(row.data['_workflow'], 'supplierReply', {'vendor': delivery.vendor_id, 'terms': body.get('terms'), 'original': message['body'], 'reference': 'gmail_mcp:'+message['id']})
+    delivery.status = 'replied'
+    return workspace.persist(db, value, row.revision, user.email, 'gmail.reply.confirmed')
+
+
+@api.get("/workspace/csv")
+def workspace_csv(user=Depends(current_user), db=Depends(get_db)):
+    from .services import workspace
+    row = db.get(Scenario, workspace.WORKSPACE)
+    if not row:
+        raise HTTPException(404, "현재 업무를 먼저 서버에 저장하세요.")
+    return {"revision": row.revision, "sources": workspace.execute(row.data['_workflow'])['csvSources']}
+
+
+@api.put("/workspace/csv/{kind}")
+def workspace_csv_import(kind: str, body: dict, user=Depends(approver), db=Depends(get_db)):
+    from .services import workspace
+    row = db.get(Scenario, workspace.WORKSPACE)
+    if not row or row.revision != body.get('expected_revision') or not isinstance(body.get('content'), str) or len(body['content']) > 2_000_000:
+        raise HTTPException(409, "CSV 내용과 서버 업무 버전을 확인하세요.")
+    value = workspace.execute(row.data['_workflow'], 'importCSV', {'kind': kind, 'csv': body['content']})
+    return workspace.persist(db, value, row.revision, user.email, 'csv.import.'+kind)
 
 
 @api.post("/settings/test-provider")

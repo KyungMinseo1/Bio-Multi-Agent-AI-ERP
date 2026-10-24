@@ -84,6 +84,10 @@ class SMTPConnectInput(StrictModel):
 
 
 class QuoteEmailInput(StrictModel):
+    delivery_mode: Literal["simulation", "smtp", "gmail_mcp"] = "smtp"
+    expected_revision: int | None = None
+    source_stamp: str = ""
+    final_confirmation: bool = False
     case_id: str = Field(min_length=1, max_length=100)
     vendor_id: str = Field(min_length=1, max_length=100)
     vendor_name: str = Field(min_length=1, max_length=200)

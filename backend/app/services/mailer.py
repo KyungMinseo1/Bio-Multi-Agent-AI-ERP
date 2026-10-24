@@ -77,6 +77,8 @@ def public_mail_settings() -> dict:
     return {
         "configured": config.configured,
         "provider": "SMTP",
+        "mcp_configured": bool(setting("GMAIL_MCP_URL")),
+        "simulation_available": True,
         "default_sender": config.default_sender,
         "default_recipient": config.default_recipient,
         "allowed_senders": list(config.allowed_senders),

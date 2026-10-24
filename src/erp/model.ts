@@ -1,3 +1,4 @@
+import type {PlannedReceipt} from '../workflow/rules';
 import {addDays,BASE} from '../data';
 export {BASE,addDays};
 export type Scenario='base'|'qc-delay'|'production-delay'|'temperature'|'quality-scope'|'unrelated'|'cash'|'c-quality';
@@ -6,10 +7,10 @@ export interface Product {id:string;name:string;manufacturer:string;sku:string;f
 export interface Lot {id:string;material:string;quantity:number;qc:'합격'|'품질 보류';qa:'승인'|'미승인';expiry:string;coa:string;temperature:'적합'|'이탈';hold:string;releaseCondition:string;received:string;}
 export interface Production {id:string;name:string;date:string;il7:number;il15:number;completion:string;delivery:string;budget:number;}
 export interface Shipment {id:string;lot:string;quantity:number;arrival:string;expiry:string;qcDelay:number;temperature:'적합'|'이탈';qaHold:boolean;confirmed:boolean;coa:string;commitment:string;payment:string;cashLimit:number;}
-export interface Vendor {id:string;name:string;unitPrice:number;moq:number;multiple:number;shipping:number;approved:boolean;productApproved:boolean;confirmed:boolean;quoteExpiry:string;quoteRef:string;contractRef:string;changeTerms:string;shipments:Shipment[];}
+export interface Vendor {email?:string;leadDays?:number;id:string;name:string;unitPrice:number;moq:number;multiple:number;shipping:number;approved:boolean;productApproved:boolean;confirmed:boolean;quoteExpiry:string;quoteRef:string;contractRef:string;changeTerms:string;shipments:Shipment[];}
 export interface Config {budget:number;qcDays:number;qaDays:number;testingPerLot:number;storagePerVialDay:number;disposalPerVial:number;safetyBudget:number;horizon:string;scenario:Scenario;}
 export interface QualityNotice {id:string;manufacturer:string;product:string;lot:string;relevanceConfirmed:boolean;note:string;}
-export interface ErpData {schema:2;notices:QualityNotice[];revision:number;products:Product[];lots:Lot[];productions:Production[];vendors:Vendor[];config:Config;changes:Change[];}
+export interface ErpData {plannedReceipts?:PlannedReceipt[];schema:2;notices:QualityNotice[];revision:number;products:Product[];lots:Lot[];productions:Production[];vendors:Vendor[];config:Config;changes:Change[];}
 export interface Change {id:string;at:string;entity:string;field:string;before:string;after:string;}
 export interface ScenarioInfo {id:Scenario;name:string;description:string;source:string;}
 export const scenarios:ScenarioInfo[]=[

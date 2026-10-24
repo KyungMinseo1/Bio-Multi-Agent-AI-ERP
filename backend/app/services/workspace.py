@@ -9,7 +9,7 @@ from pathlib import Path
 import subprocess
 from sqlalchemy import select, delete
 from fastapi import HTTPException
-from ..models import Scenario, ERPRecord, Recommendation, DiscussionRun, AuditEvent
+from ..models import Scenario, ERPRecord, Recommendation, DiscussionRun, AuditEvent, OutboundEmail
 from ..config import COLLECTIONS
 from .erp import lock_revision, audit
 
@@ -54,6 +54,7 @@ def persist(db, value, expected, actor, action):
     projection = copy.deepcopy(value['projection'])
     metadata = {k: v for k, v in projection.items() if k not in COLLECTIONS}
     metadata['_workflow'] = value['workflow']
+    metadata['_csv_sources'] = value.get('csvSources', {})
     metadata['_canonical_calculation']['revision'] = revision
     row.data = metadata
     # Only our derived projection is replaced; other scenarios and immutable audit/run tables stay intact.
@@ -95,6 +96,9 @@ def command(db, name, args, expected, user):
     allowed = {'detect', 'approveInquiry', 'startInquiries', 'receiveReplies', 'analyze', 'registerPO', 'trackNext', 'trackingIssue', 'trackReview', 'finishProduction'}
     if name not in allowed:
         raise HTTPException(422, '허용되지 않은 업무 명령')
+    if name == 'receiveReplies':
+        external = db.scalars(select(OutboundEmail).where(OutboundEmail.delivery_mode != 'simulation', OutboundEmail.status.in_(['sent', 'replied']))).all()
+        args = {**args, 'externallySentVendors': [item.vendor_id for item in external if item.case_id == 'PR-IL7-20261024']}
     workflow = row.data['_workflow']
     review = (workflow.get('integration') or {}).get('externalReview')
     if name == 'registerPO' and review:

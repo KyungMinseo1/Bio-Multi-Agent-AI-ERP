@@ -22,7 +22,7 @@ def assert_migrated():
     if not inspect(engine).has_table("alembic_version"):
         raise RuntimeError("Database migration required: run alembic upgrade head")
     with engine.connect() as conn:
-        if conn.execute(text("SELECT version_num FROM alembic_version")).scalar() != "0002_outbound_emails":
+        if conn.execute(text("SELECT version_num FROM alembic_version")).scalar() != "0003_quote_workflow":
             raise RuntimeError("Database migration required: run alembic upgrade head")
 
 
