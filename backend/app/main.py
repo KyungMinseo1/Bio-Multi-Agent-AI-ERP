@@ -16,7 +16,7 @@ from .auth import COOKIE, approver, bootstrap_accounts, current_user, mutation_u
 from .config import COLLECTIONS, setting, planning_date, review_rounds
 from .db import get_db, SessionLocal, assert_migrated
 from .models import User, Session, Scenario, ERPRecord, Job, DiscussionRun, RunArtifact, Recommendation, ExternalSource, ExternalIssue, IssueEvidence, CollectionRun, AuditEvent, Alert, OutboundEmail, uid, now
-from .schemas import Login, DiscussionInput, ApprovalInput, DepartmentTurn, QuoteEmailInput
+from .schemas import Login, DiscussionInput, ApprovalInput, DepartmentTurn, QuoteEmailInput, SMTPConnectInput
 from .providers import require_configuration, public_settings, ProviderError, generate_json, close_clients
 from .scenarios import list_scenarios
 from .services.erp import ensure_scenario, snapshot, mutate, audit, lock_revision, enqueue_recalculation
@@ -26,7 +26,7 @@ from .services.discussions import artifact
 from .services.external_sources import seed_sources, sync_source, validate_url, public_addresses, CollectionError
 from .services.planning import evaluate
 from .models import utc_iso
-from .services.mailer import MailConfigurationError, MailDeliveryError, mail_configuration, public_mail_settings, send_quote_email, validate_email_address
+from .services.mailer import MailConfigurationError, MailDeliveryError, connect_gmail, mail_configuration, public_mail_settings, send_quote_email, validate_email_address
 
 
 @asynccontextmanager
@@ -58,6 +58,18 @@ def settings(db=Depends(get_db)):
 @api.get("/mail/settings")
 def email_settings(user=Depends(approver)):
     return public_mail_settings()
+
+
+@api.post("/mail/connect")
+def email_connect(body: SMTPConnectInput, user=Depends(approver)):
+    try:
+        return connect_gmail(body.app_password.get_secret_value())
+    except (MailConfigurationError, ValueError) as exc:
+        raise HTTPException(422, str(exc)) from None
+    except MailDeliveryError as exc:
+        raise HTTPException(502, str(exc)) from None
+    except OSError:
+        raise HTTPException(500, "메일 인증 설정을 저장하지 못했습니다.") from None
 
 
 @api.get("/mail/outbox")

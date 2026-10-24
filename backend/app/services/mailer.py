@@ -1,18 +1,25 @@
 """Server-side SMTP delivery for approved BioFlow quote requests."""
 import csv
 import io
+import json
+import os
 import re
 import smtplib
 import ssl
+import tempfile
 from dataclasses import dataclass
 from datetime import date
 from email.message import EmailMessage
-from email.utils import formataddr, make_msgid
+from email.utils import formataddr
+from pathlib import Path
+
+from dotenv import dotenv_values
 
 from ..config import setting
 from ..schemas import QuoteEmailInput
 
 EMAIL_RE = re.compile(r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$")
+RUNTIME_MAIL_FILE = Path(__file__).resolve().parents[3] / ".runtime" / "mail.env"
 
 
 @dataclass(frozen=True)
@@ -23,6 +30,7 @@ class MailConfiguration:
     username: str
     password: str
     default_sender: str
+    default_recipient: str
     allowed_senders: tuple[str, ...]
 
     @property
@@ -50,13 +58,16 @@ def mail_configuration() -> MailConfiguration:
     default = setting("BIOFLOW_SMTP_DEFAULT_FROM", username).strip().lower()
     configured_senders = setting("BIOFLOW_SMTP_ALLOWED_FROM", default).split(",")
     allowed = tuple(dict.fromkeys(x.strip().lower() for x in configured_senders if x.strip()))
+    saved = dotenv_values(RUNTIME_MAIL_FILE) if RUNTIME_MAIL_FILE.is_file() else {}
+    saved_password = saved.get("BIOFLOW_SMTP_PASSWORD", "") if saved.get("BIOFLOW_SMTP_USERNAME") == username else ""
     return MailConfiguration(
         host=setting("BIOFLOW_SMTP_HOST").strip(),
         port=port,
         security=setting("BIOFLOW_SMTP_SECURITY", "starttls").strip().lower(),
         username=username,
-        password=setting("BIOFLOW_SMTP_PASSWORD"),
+        password=setting("BIOFLOW_SMTP_PASSWORD") or saved_password or "",
         default_sender=default,
+        default_recipient=setting("BIOFLOW_SMTP_DEFAULT_TO").strip().lower(),
         allowed_senders=allowed,
     )
 
@@ -66,12 +77,54 @@ def public_mail_settings() -> dict:
     return {
         "configured": config.configured,
         "provider": "SMTP",
-        "default_sender": config.default_sender if config.configured else "",
-        "allowed_senders": list(config.allowed_senders) if config.configured else [],
-        "security": config.security if config.configured else None,
+        "default_sender": config.default_sender,
+        "default_recipient": config.default_recipient,
+        "allowed_senders": list(config.allowed_senders),
+        "security": config.security,
+        "credential_present": bool(config.password),
+        "connection_setup_available": config.host.lower() == "smtp.gmail.com",
         "authentication_required": True,
         "reply_sync": False,
     }
+
+
+def connect_gmail(app_password: str) -> dict:
+    """Verify SMTP authentication without sending mail, then save a private credential."""
+    config = mail_configuration()
+    password = "".join(app_password.split())
+    if config.host.lower() != "smtp.gmail.com" or config.security not in {"starttls", "ssl"} or not 1 <= config.port <= 65535:
+        raise MailConfigurationError("Gmail SMTP 서버 설정을 확인하세요.")
+    if setting("BIOFLOW_SMTP_PASSWORD"):
+        raise MailConfigurationError("환경변수에 SMTP 비밀번호가 이미 설정되어 있습니다. 서버 환경에서 변경하세요.")
+    sender = validate_email_address(config.default_sender)
+    if config.username.lower() != sender or sender not in config.allowed_senders:
+        raise MailConfigurationError("SMTP 계정과 허용 발신 주소를 확인하세요.")
+    if not re.fullmatch(r"[A-Za-z0-9]{16}", password):
+        raise ValueError("Gmail에서 발급한 16자리 앱 비밀번호를 입력하세요.")
+    try:
+        if config.security == "ssl":
+            with smtplib.SMTP_SSL(config.host, config.port, timeout=25, context=ssl.create_default_context()) as server:
+                server.login(config.username, password)
+        else:
+            with smtplib.SMTP(config.host, config.port, timeout=25) as server:
+                server.ehlo()
+                server.starttls(context=ssl.create_default_context())
+                server.ehlo()
+                server.login(config.username, password)
+    except (smtplib.SMTPException, OSError, TimeoutError):
+        raise MailDeliveryError("Gmail 인증에 실패했습니다. 앱 비밀번호와 계정 보안 설정을 확인하세요.") from None
+    RUNTIME_MAIL_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=RUNTIME_MAIL_FILE.parent, delete=False) as output:
+            temporary = Path(output.name)
+            os.chmod(temporary, 0o600)
+            output.write(f"BIOFLOW_SMTP_USERNAME={json.dumps(config.username)}\nBIOFLOW_SMTP_PASSWORD={json.dumps(password)}\n")
+        os.replace(temporary, RUNTIME_MAIL_FILE)
+    finally:
+        if temporary and temporary.exists():
+            temporary.unlink()
+    return {"status": "connected", **public_mail_settings()}
 
 
 def validate_email_address(value: str) -> str:

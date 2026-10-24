@@ -84,6 +84,8 @@ DB는 ERP 원본, 분석 실행·산출물, 추천, 승인, 작업 큐, 감사 �
 
 서버는 승인자 권한, 이메일 형식, 허용 발신 주소와 idempotency key를 검증하고 TLS SMTP로 전송합니다. 발송 이력에는 업체, 발신·수신 주소, 제목, 처리 상태와 Message-ID를 저장합니다. 메일 본문과 SMTP 자격증명은 발송 이력에 저장하지 않습니다.
 
+발신·수신 기본 주소는 서버 환경변수에서 읽습니다. Gmail 인증정보가 없으면 메일 작성 화면에서 앱 비밀번호로 연결할 수 있습니다. 인증을 확인한 자격증명은 접근 권한을 제한한 `.runtime/mail.env`에 저장하며, 연결 확인 중에는 메일을 발송하지 않습니다.
+
 SMTP 수락 상태와 최종 수신·회신 상태는 구분됩니다. 답장 자동 동기화는 지원하지 않으며, 외부 메일을 발송한 업체에는 자동 생성된 공급 확약을 적용하지 않습니다.
 
 ## 프로젝트 구성
@@ -143,7 +145,7 @@ npm run start:local
 | `LLM_REVIEW_ROUNDS`, `LLM_REASONING_EFFORT` | 검토 반복 횟수와 지원 공급자의 추론 옵션 |
 | `BIOFLOW_SMTP_HOST`, `BIOFLOW_SMTP_PORT`, `BIOFLOW_SMTP_SECURITY` | SMTP 서버와 TLS 방식(`starttls` 또는 `ssl`) |
 | `BIOFLOW_SMTP_USERNAME`, `BIOFLOW_SMTP_PASSWORD` | SMTP 로그인 자격증명 |
-| `BIOFLOW_SMTP_DEFAULT_FROM`, `BIOFLOW_SMTP_ALLOWED_FROM` | 기본 발신 주소와 쉼표로 구분한 허용 발신 주소 |
+| `BIOFLOW_SMTP_DEFAULT_FROM`, `BIOFLOW_SMTP_DEFAULT_TO`, `BIOFLOW_SMTP_ALLOWED_FROM` | 기본 발신·수신 주소와 쉼표로 구분한 허용 발신 주소 |
 
 환경변수 예시는 [`.env.example`](.env.example)에 있습니다. 자격증명은 서버 환경에만 저장하며 `.env`, DB, `.runtime/`, 의존성 및 빌드 산출물은 Git 추적에서 제외합니다.
 
@@ -164,6 +166,7 @@ npm run start:local
 | `GET` | `/discussions/{run_id}/events` | AI 검토 진행 이벤트(SSE) |
 | `POST` | `/recommendations/{recommendation_id}/approve` | 추천 최종 승인과 발주 등록 |
 | `GET` | `/mail/settings`, `/mail/outbox` | 승인자용 메일 설정·발송 이력 조회 |
+| `POST` | `/mail/connect` | 승인자용 Gmail SMTP 인증 확인·자격증명 저장 |
 | `POST` | `/mail/quote-requests` | 견적 요청 메일 발송 |
 
 ## 개발 검증

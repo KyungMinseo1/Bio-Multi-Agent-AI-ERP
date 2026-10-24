@@ -75,3 +75,5 @@
 @media(max-width:700px){.wf-mail-form{grid-template-columns:1fr}.wf-mail-form label.full{grid-column:auto}.wf-modal:has(.wf-mail-form){width:calc(100vw - 20px)}.wf-mail-history>div{grid-template-columns:1fr}}
 
 .wf-mail-sender-error{display:block;margin-top:3px;color:#9c4439;font-style:normal;font-weight:600}
+
+.wf-mail-connect{padding:16px;margin:14px 0;border:1px solid #c3cfda;background:#f5f8fa}.wf-mail-connect label{display:flex;flex-direction:column;gap:7px;font-size:15px;font-weight:600}.wf-mail-connect input{font:inherit;border:1px solid #aebdca;background:#fff;padding:9px 11px;width:100%;max-width:360px}.wf-mail-connect p{font-size:13px;line-height:1.7;margin:9px 0 12px;color:#526a82}.wf-mail-connect a{color:#235b89;text-decoration:underline}

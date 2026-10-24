@@ -1,5 +1,5 @@
 from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 
 class StrictModel(BaseModel):
@@ -77,6 +77,10 @@ class QuoteScheduleLine(StrictModel):
     production_id: str = Field(min_length=1, max_length=80)
     needed_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
     quantity: int = Field(ge=1, le=10000)
+
+
+class SMTPConnectInput(StrictModel):
+    app_password: SecretStr
 
 
 class QuoteEmailInput(StrictModel):
