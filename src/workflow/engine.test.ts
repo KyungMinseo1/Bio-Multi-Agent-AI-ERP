@@ -1,6 +1,6 @@
 import {describe,it,expect} from 'vitest';
 import {createSeed,addDays} from '../erp/model';
-import {seedWorkflow,risk,detect,approveInquiry,startInquiries,receiveReplies,followupInquiry,runAgent,agents,integrate,extraAnalyze,finalErrors,registerPO,editData,trackNext,trackingIssue,trackReview,finishProduction,expireReplies,downstreamRows,type Workflow} from './engine';
+import {seedWorkflow,risk,detect,approveInquiry,startInquiries,receiveReplies,followupInquiry,analysisBlockers,runAgent,agents,integrate,extraAnalyze,finalErrors,registerPO,editData,trackNext,trackingIssue,trackReview,finishProduction,expireReplies,downstreamRows,type Workflow} from './engine';
 function ready(mode:'normal'|'missing'|'unavailable'|'partial'='normal'){return receiveReplies(startInquiries(approveInquiry(detect(seedWorkflow()))),mode)}
 function analyzed(s=ready()){for(const a of agents)s=runAgent(s,a.id);s=integrate(s);if(s.extraRequests.some(q=>!q.resolved))s=extraAnalyze(s);return s;}
 function ordered(){return registerPO(analyzed());}
@@ -34,4 +34,10 @@ describe('발주 이후 실제 상태·가용량·생산 배정',()=>{
  it('B2회차 QC+3일 →11.12 →11.11 생산2개 부족 · 재평가 이력',()=>{let s=ordered();const o=s.orders[0];s=trackingIssue(s,o.id,o.lines[1].id,'delay');expect(s.orders[0].lines[1].available).toBe('2026-11-12');expect(risk(s).rows.find(p=>p.id==='PROD-02')!.shortage).toBe(2);s=trackReview(s);expect(s.notifications[0].body).toContain('부족 2개');expect(s.orders).toHaveLength(1)});
  it('지연 후 QA된 물량을 과거 생산에 소급 배정하지 않는다',()=>{let s=ordered();const o=s.orders[0];s=trackingIssue(s,o.id,o.lines[1].id,'delay');for(const l of o.lines)for(let k=0;k<5;k++)s=trackNext(s,o.id,l.id);s=finishProduction(s);expect(s.produced).not.toContain('PROD-02');expect(risk(s).rows.find(p=>p.id==='PROD-02')!.shortage).toBeGreaterThan(0);expect(s.produced).toContain('PROD-03')});
  it('온도 이탈 회차만 QA 보류, AI는 임의 해제하지 않음',()=>{let s=ordered();const o=s.orders[0];s=trackingIssue(s,o.id,o.lines[1].id,'quality');expect(s.orders[0].lines.map(l=>l.blocked)).toEqual([false,true,false]);expect(()=>trackNext(s,o.id,o.lines[1].id)).toThrow('보류');expect(risk(s).shortage).toBe(2)});
+});
+
+describe('분석 선행 업무 안내',()=>{
+ it('승인·문의·회신 누락을 순서대로 구분한다',()=>{let s=seedWorkflow();expect(analysisBlockers(s)[0]).toContain('1차');s=approveInquiry(s);expect(analysisBlockers(s)[0]).toContain('요청을 먼저');s=startInquiries(s);expect(analysisBlockers(s)[0]).toContain('회신 처리');expect(()=>runAgent(s,'inventory')).toThrow('회신 처리');expect(s.findings).toHaveLength(0)});
+ it('회신을 처리한 동일 데이터에서는 4개 분석을 실행할 수 있다',()=>{let s=ready();expect(analysisBlockers(s)).toEqual([]);for(const a of agents)s=runAgent(s,a.id);expect(s.findings).toHaveLength(4)});
+ it('공급 불가·미회신도 판단 대상이므로 확약이 없다고 분석을 막지 않는다',()=>{const s=ready('unavailable');expect(analysisBlockers(s)).toEqual([]);expect(runAgent(s,'purchase').findings).toHaveLength(1)});
 });

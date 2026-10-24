@@ -77,3 +77,5 @@
 .wf-mail-sender-error{display:block;margin-top:3px;color:#9c4439;font-style:normal;font-weight:600}
 
 .wf-mail-connect{padding:16px;margin:14px 0;border:1px solid #c3cfda;background:#f5f8fa}.wf-mail-connect label{display:flex;flex-direction:column;gap:7px;font-size:15px;font-weight:600}.wf-mail-connect input{font:inherit;border:1px solid #aebdca;background:#fff;padding:9px 11px;width:100%;max-width:360px}.wf-mail-connect p{font-size:13px;line-height:1.7;margin:9px 0 12px;color:#526a82}.wf-mail-connect a{color:#235b89;text-decoration:underline}
+
+.wf-analysis-notice{margin-bottom:16px;padding:16px 20px;border:1px solid #d7c69e;border-left:4px solid #ab8545;background:#fff9ee;color:#614f30}.wf-analysis-notice b{font-size:17px}.wf-analysis-notice p{font-size:15px;line-height:1.75;margin:5px 0}.wf-analysis-notice .button{margin-top:9px}.wf-analysis-notice.error{background:#fff3f1;border-color:#d4aaa4;color:#8b4036}
