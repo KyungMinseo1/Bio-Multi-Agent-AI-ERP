@@ -8,7 +8,7 @@ export default function CandidateComparison({ candidates, compact = false, stage
     return <article className={`candidate-card ${stage === 'recommendation' && index === 0 && valid ? 'recommended' : ''}`} key={text(candidate.id)}>
       <div className="candidate-top"><span className="candidate-number">{stage === 'calculation' ? text(candidate.plan_label) || `안 ${index + 1}` : `${index + 1}순위`}</span>{stage === 'recommendation' && <Badge value={!valid ? 'infeasible' : validation.requires_budget_approval ? 'requires_budget_approval' : 'feasible'}/>}</div>
       <h3>{text(candidate.name)}</h3>
-      <p className="projection-note">{stage === 'calculation' ? '협의 전 기본 수치 · 아래 표시는 구분용이며 순위가 아닙니다.' : 'Admin이 통합 검토한 추천 순서 · 담당자의 최종 선택과 승인이 필요합니다.'}</p>
+      <p className="projection-note">{stage === 'calculation' ? '협의 전 기본 수치 · 아래 표시는 구분용이며 순위가 아닙니다.' : 'Orchestrator가 통합 검토한 추천 순서 · 담당자의 최종 선택과 승인이 필요합니다.'}</p>
       <p className="candidate-quantity">주문 수량 <strong>{quantity(candidate.quantity)}</strong></p>
       <div className="candidate-cost"><span>예상 총비용</span><strong>{money(costs.total)}</strong><small>구매 + 운송 + 보관 + 시험 + 예상 폐기</small></div>
       {stage === 'recommendation' ? <div className="candidate-checks">

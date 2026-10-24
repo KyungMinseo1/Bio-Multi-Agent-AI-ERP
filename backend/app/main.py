@@ -59,7 +59,7 @@ async def test_provider(body: dict, user=Depends(approver)):
     if role not in public_settings()["roles"]:
         raise HTTPException(422, "Unknown department role")
     try:
-        result = await generate_json(role, [{"role": "system", "content": "Connectivity test. Return role as assigned, strategy_id='connection-test', version=1, proposal={candidate_ids:[],summary:'연결 확인'}, impacts=[],reasons=[],evidence_refs=[],change_requests=[],position='needs_information',recommendations=[]."}, {"role": "user", "content": f"Assigned role: {role}. No procurement decision is requested."}], DepartmentTurn.model_json_schema())
+        result = await generate_json(role, [{"role": "system", "content": "Connectivity test. Return role as assigned, strategy_id='connection-test', version=1, proposal={candidate_ids:[],summary:'연결 확인'}, impacts=[],reasons=[],evidence_refs=[],change_requests=[],position='needs_information',recommendations=[]."}, {"role": "user", "content": f"Assigned role: {role}. No procurement decision is requested."}], DepartmentTurn)
     except ProviderError as exc:
         raise HTTPException(503, detail={"code": exc.code, "message": exc.message, "role": role})
     return {"status": "connected", "role": role, "response": result}

@@ -3,7 +3,7 @@ import os
 from zoneinfo import ZoneInfo
 from datetime import datetime
 
-CANONICAL_ROLES = ("purchasing", "inventory_planning", "quality", "finance", "admin")
+CANONICAL_ROLES = ("purchasing", "inventory_planning", "quality", "finance", "orchestrator")
 MAX_REVIEW_ROUNDS = 5
 
 

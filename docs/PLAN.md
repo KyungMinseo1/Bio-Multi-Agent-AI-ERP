@@ -1,7 +1,7 @@
 # 바이오 원료 발주 ERP 및 멀티 에이전트
 
 ## Context
-가상 데이터를 실제 저장·입력하는 독립 웹 ERP 위에 선제 발주 감지 → 부서별 실제 LLM 토론 → Admin 검토 → 사용자 대안 선택 → 내부 발주 등록을 구현한다. OpenAI, Gemini, OpenRouter, vLLM을 지원하고 공식 외부 이슈 자동 수집을 포함한다. 실제 공급업체 주문 전송이나 발주 이후 성과 분석 제품 전체는 이번 범위가 아니며, 재고·입고 예정·시험·승인 상태 입력은 의사결정에 필요한 수준으로 제공한다.
+가상 데이터를 실제 저장·입력하는 독립 웹 ERP 위에 선제 발주 감지 → 부서별 실제 LLM 토론 → Orchestrator 검토 → 사용자 대안 선택 → 내부 발주 등록을 구현한다. OpenAI, Gemini, OpenRouter, vLLM을 지원하고 공식 외부 이슈 자동 수집을 포함한다. 실제 공급업체 주문 전송이나 발주 이후 성과 분석 제품 전체는 이번 범위가 아니며, 재고·입고 예정·시험·승인 상태 입력은 의사결정에 필요한 수준으로 제공한다.
 
 근거: 현재 저장소는 README.md(제목만), .gitignore, docs의 두 PDF뿐이며 구현 코드·실행 설정이 없다. docs/바이오_원료발주_AI_ERP_기획정리_v1.4.pdf 1~5쪽의 부서 역할, 날짜별 가용 재고, 납품 역산, 품질 필수조건, 불변 전략 이력, 외부 이슈 관련성 확인을 기준으로 한다. docs/해커톤 설명 요약.pdf에 플렉스튜디오 언급이 있으나 사용자는 독립 웹 ERP를 선택했다.
 
@@ -42,29 +42,31 @@ backend/app/services/planning.py의 evaluate_material(material_id: UUID, as_of: 
 
 수정 API의 트랜잭션에 재계산 Job을 함께 넣는다. worker는 DB의 FOR UPDATE SKIP LOCKED로 작업을 점유하고 원료별 중복 작업을 합친다. 재시작 시 만료된 작업 lease를 회수한다. 주기적 재평가와 외부 수집도 동일 worker에서 실행한다. GET /alerts, POST /planning/recalculate, POST /alerts/{id}/acknowledge를 제공한다.
 
-### 4. 네 AI 병렬 검토와 Admin 통합 선정, 공급자 호출 경계
+### 4. 네 AI 병렬 검토와 Orchestrator 통합 선정, 공급자 호출 경계
 backend/app/providers에 공통 async generate_json(role: str, messages: list[Message], schema: dict) -> dict 인터페이스와 OpenAI/Gemini/OpenRouter/vLLM 어댑터를 둔다. openai와 google-genai SDK를 직접 사용하며 별도 에이전트 프레임워크는 도입하지 않는다. provider/model/base_url/timeout은 서버 설정과 역할별 매핑으로 선택하고 API 키는 환경변수만 읽는다. /settings에는 키 값이 아닌 설정 여부와 모델/역할 매핑만 표시한다. 연결 확인은 실제 짧은 구조화 호출로 수행한다. 구성되지 않은 공급자는 명시적인 configuration_error이며 mock으로 대체하지 않는다.
 
-공급자별 계약은 다음으로 고정한다. 모든 모델 ID는 환경변수로 명시하며 임의 기본 모델/자동 공급자 전환은 없다. 공통 LLM_TIMEOUT_SECONDS=60, OpenAI 계열 SDK max_retries=0. Pydantic extra=forbid, object 루트, 모든 속성 required(선택값은 nullable), 중첩 additionalProperties=false인 공통 스키마를 사용한다.
+공급자별 계약은 다음으로 고정한다. 모든 모델 ID는 환경변수로 명시하며 임의 기본 모델/자동 공급자 전환은 없다. 공통 LLM_TIMEOUT_SECONDS=60, Orchestrator 전용 LLM_ORCHESTRATOR_TIMEOUT_SECONDS=180이며 역할별 LLM_ROLE_MAPPING의 timeout(초)이 두 기본 설정보다 우선한다. 제한 시간은 응답 목표가 아닌 실패 상한이다. LLM_REASONING_EFFORT=low로 빠른 판단을 요청하며 역할별 reasoning_effort가 우선한다. auto는 API 제어 생략/모델 기본값이지 추론 비활성화가 아니다. /settings에는 역할별 timeout과 추론 강도를 표시한다. API와 worker 모두 환경변수 변경 후 재시작하며 Compose에서는 컨테이너를 재생성한다. 비동기 LLM 호출의 시간초과는 해당 실행의 실패이지 서버 전체 중단을 뜻하지 않는다. 시간초과 후 자동 재시도·추가 축약·검증 우회는 없다. OpenAI 계열 SDK max_retries=0. Pydantic extra=forbid, object 루트, 모든 속성 required(선택값은 nullable), 중첩 additionalProperties=false인 공통 스키마를 사용한다.
 - OpenAI: AsyncOpenAI.responses.parse(model=OPENAI_MODEL, input=messages, text_format=해당 Pydantic 모델), https://api.openai.com/v1/responses. completed와 output_parsed를 확인하고 refusal/incomplete는 실패 처리한다.
-- Gemini: genai.Client(api_key=GEMINI_API_KEY, http_options=types.HttpOptions(timeout=60000)).aio.models.generate_content(model=GEMINI_MODEL, contents=직렬화한 문맥, config=types.GenerateContentConfig(system_instruction=역할 지시, response_mime_type="application/json", response_json_schema=schema)). prompt block/finish_reason/빈 후보를 확인한 뒤 response.text를 로컬 검증한다.
+- Gemini: genai.Client(api_key=GEMINI_API_KEY, http_options=types.HttpOptions(timeout=역할별_제한초*1000)).aio.models.generate_content(model=GEMINI_MODEL, contents=직렬화한 문맥, config=types.GenerateContentConfig(system_instruction=역할 지시, response_mime_type="application/json", response_json_schema=schema)). prompt block/finish_reason/빈 후보를 확인한 뒤 response.text를 로컬 검증한다.
 - OpenRouter: AsyncOpenAI(base_url="https://openrouter.ai/api/v1").chat.completions.create(model=OPENROUTER_MODEL, messages=messages, response_format={"type":"json_schema","json_schema":{"name":"department_turn","strict":true,"schema":schema}}, extra_body={"provider":{"require_parameters":true}}). HTTP 200의 error 필드도 실패 처리한다.
 - vLLM: VLLM_BASE_URL은 /v1로 끝나는 서버 주소, VLLM_MODEL은 served model ID. chat.completions.create에 표준 response_format json_schema를 전달한다. 구버전 guided_json은 사용하지 않는다. 인증 없는 배포만 SDK api_key에 비밀이 아닌 "not-required"를 사용한다.
 - Chat Completions는 stop 완료·비어 있지 않은 content를 확인하고 JSON/Pydantic/근거 참조 검증을 모두 통과해야 성공이다. SDK 클라이언트는 실행 프로세스 수명 동안 재사용하고 종료 시 닫는다. 예외는 timeout/transport/provider_rejected/refused_or_blocked/incomplete/invalid_output으로 정규화하고 사용자 오류에 키/헤더를 포함하지 않는다.
+
+활성 통합 역할 키는 orchestrator이며 이전 admin 설정 별칭은 지원하지 않는다. 저장된 과거 admin 스냅샷·메시지·오류는 수정하지 않고 과거 통합 역할로 표시한다. 현재 검토 AI 목록과 라운드 계산에서는 제외하며 승인 계약은 유지한다.
 
 공식 계약 근거: https://developers.openai.com/api/docs/guides/structured-outputs ; https://github.com/openai/openai-python ; https://ai.google.dev/gemini-api/docs/structured-output ; https://github.com/googleapis/python-genai ; https://openrouter.ai/docs/guides/features/structured-outputs ; https://docs.vllm.ai/en/stable/features/structured_outputs/ . 문서 확인이며 실제 인증 호출은 아직 수행하지 않았다.
 
 POST /discussions는 alert_id와 ERP snapshot revision으로 202와 run_id를 반환한다. GET /discussions/{id}와 /events는 영속 메시지와 Last-Event-ID로 재접속 가능한 SSE를 제공한다. 상태는 queued/running/awaiting_review/completed/failed/stale. 실행 중 ERP 입력이 바뀌어도 토론은 기존 snapshot으로 끝내고 stale을 표시한다.
 
-구매(`purchasing`)·재고/생산계획(`inventory_planning`)·품질(`quality`)·재무(`finance`) 네 AI가 같은 스냅샷과 등록 후보를 처음부터 동시에 검토한다. 구매 AI는 발주 담당자의 AI이며 별도 선행 단계가 아니다. `LLM_REVIEW_ROUNDS` 기본 1회, 2이면 네 AI 병렬 검토를 정확히 2회 실행한다. 다음 회차에는 이전 회차 전체 의견을 공유한다. 실행 생성 시 회차 수를 계산 스냅샷에 고정하고, 모든 회차가 끝난 뒤 Admin이 전체 context를 통합한다. 모든 메시지는 strategy_id/version/role/proposal/impacts/reasons/evidence_refs/change_requests/position(accept, object, needs_information) 구조로 검증한다. 없는 근거 ID는 거부하며 통합 역할에서도 일정·품질·폐기·공간·비용·지급 검토를 생략하지 않는다.
+구매(`purchasing`)·재고/생산계획(`inventory_planning`)·품질(`quality`)·재무(`finance`) 네 AI가 같은 등록 후보를 처음부터 동시에 검토한다. 각 AI는 ERP 전체가 아니라 `ROLE_DATA`에 정한 자기 부서 ERP 컬렉션, 공통 목표인 원료 부족 상황(`goal`), 후보별 공통 수치와 역할 관련 필드(`CANDIDATE_FIELDS`)만 받으며 후보별 날짜별 타임라인은 전달하지 않는다(재고/생산계획만 원료 단위 타임라인을 받는다). 근거 인용 허용 목록도 해당 역할 입력으로 한정한다. 구매 AI는 발주 담당자의 AI이며 별도 선행 단계가 아니다. `LLM_REVIEW_ROUNDS` 기본 1회, 2이면 네 AI 병렬 검토를 정확히 2회 실행한다. 다음 회차에는 이전 회차 전체 의견을 공유한다. 실행 생성 시 회차 수를 계산 스냅샷에 고정한다. 통합 입력은 ERP 레코드 없이 모든 회차의 구조화된 검토 결과와 후보 표(ID·이름·수량·비용·적격성 검증)뿐이며, 통합 AI는 검토 AI가 인용한 근거 ID만 인용할 수 있다. 별도 LLM 요약 호출 없이 결정적으로 구성하고 후보·검토 회차·이견을 임의로 잘라내지 않는다. 모든 메시지는 strategy_id/version/role/proposal/impacts/reasons/evidence_refs/change_requests/position(accept, object, needs_information) 구조로 검증한다. 없는 근거 ID는 거부하며 통합 역할에서도 일정·품질·폐기·공간·비용·지급 위험을 보존한다. 원본 스냅샷은 실행 기록에 보존하고 서버의 최종 계산 재검증에 사용한다.
 
 LLM은 공급업체/가격/기한/승인 상태를 만들어낼 수 없으며 제안은 등록된 offer_id와 허용 수량/입고 일정으로만 구성한다. 수정안도 planning.validate_strategy로 재검증한다. JSON 오류 시 오류 목록을 포함해 동일 역할에 한 번만 수정 요청하고 다시 실패하면 run=failed, 해당 역할·원인을 UI에 노출한다. 호출 시간초과/통신/인증 오류도 숨기거나 성공으로 대체하지 않는다.
 
-Admin은 전체 회차의 의견과 계산 검증 결과를 읽고 최적 제안을 선정해 근거와 우선순위를 제출한다. 서버는 필수조건·납기·현금 제약을 재검증하되 계산기의 기존 순위로 Admin 순서를 덮어쓰지 않는다. 적합한 안이 없으면 발주 불가·추가 확인사항을 표시하며, 잔여 반대·미확인 사항·추가 비용·납기 근거를 보존한다. UI는 네 AI와 Admin의 진행 상태, 회차별 검토 근거와 최종 추천을 보여준다.
+Orchestrator는 전체 회차의 의견과 계산 검증 결과를 읽고 최적 제안을 선정해 근거와 우선순위를 제출한다. 서버는 필수조건·납기·현금 제약을 재검증하되 계산기의 기존 순위로 Orchestrator 순서를 덮어쓰지 않는다. 적합한 안이 없으면 발주 불가·추가 확인사항을 표시하며, 잔여 반대·미확인 사항·추가 비용·납기 근거를 보존한다. UI는 네 AI와 Orchestrator의 진행 상태, 회차별 검토 근거와 최종 추천을 보여준다.
 
-추천 근거는 실제 토론 기록을 따라 역추적할 수 있도록 Recommendation에 rationale_items를 저장한다. 각 항목은 claim(사용자용 판단 요약), evidence_refs(ERP snapshot/계산 결과/외부 근거 ID 목록), message_refs(실제 AgentMessage ID 목록), change_refs(해당 StrategyVersion 변경 ID 목록)를 가진다. 원본이 없는 참조와 계산 결과에 반하는 수치 주장은 검증 오류로 처리한다. Admin은 실제 부서 의견·반론·수정·검증을 요약하며 내부 사고과정 공개를 요구하지 않는다. 부서 동의 자체를 사실 증명으로 취급하지 않고, 해결되지 않은 이견과 미확인 조건도 추천안에 남긴다.
+추천 근거는 실제 토론 기록을 따라 역추적할 수 있도록 Recommendation에 rationale_items를 저장한다. 각 항목은 claim(사용자용 판단 요약), evidence_refs(ERP snapshot/계산 결과/외부 근거 ID 목록), message_refs(실제 AgentMessage ID 목록), change_refs(해당 StrategyVersion 변경 ID 목록)를 가진다. 원본이 없는 참조와 계산 결과에 반하는 수치 주장은 검증 오류로 처리한다. Orchestrator는 실제 부서 의견·반론·수정·검증을 요약하며 내부 사고과정 공개를 요구하지 않는다. 부서 동의 자체를 사실 증명으로 취급하지 않고, 해결되지 않은 이견과 미확인 조건도 추천안에 남긴다.
 
-UI는 상황 → 기본 발주안 → 네 AI 병렬 검토 → Admin 통합 결과 → 담당자 선택·승인 순서다. /dashboard에서 부족량·만료 위험·미정인 실제 발주일을 설명하고 A/B/C 기본 발주안을 바로 보여준다. 검토 전에는 추천·순위·적합성 레이블 없이 수량·비용·일정·예상 폐기 등 자료만 비교한다. 추가 조합안은 별도 펼침으로 제공한다. /discussions/:id에서 실제 검토 후 추천 이유·납기 근거·총비용·제약 검증·잔여 위험·승인 필요사항을 비교한다. 각 AI 핵심 의견과 회차별 이견을 요약하고 원본 근거와 전체 기록은 상세 펼침으로 제공한다. 색상뿐 아니라 텍스트로 상태를 구별하고 ERP 수정 경로를 유지한다.
+UI는 상황 → 기본 발주안 → 네 AI 병렬 검토 → Orchestrator 통합 결과 → 담당자 선택·승인 순서다. /dashboard에서 부족량·만료 위험·미정인 실제 발주일을 설명하고 A/B/C 기본 발주안을 바로 보여준다. 검토 전에는 추천·순위·적합성 레이블 없이 수량·비용·일정·예상 폐기 등 자료만 비교한다. 추가 조합안은 별도 펼침으로 제공한다. /discussions/:id에서 실제 검토 후 추천 이유·납기 근거·총비용·제약 검증·잔여 위험·승인 필요사항을 비교한다. 각 AI 핵심 의견과 회차별 이견을 요약하고 원본 근거와 전체 기록은 상세 펼침으로 제공한다. 색상뿐 아니라 텍스트로 상태를 구별하고 ERP 수정 경로를 유지한다.
 
 ### 5. 공식 외부 이슈 자동 수집과 수동 확인을 연결
 backend/app/services/external_sources.py에 openFDA JSON과 public RSS/Atom의 두 수집기를 구현한다. ExternalIssue는 source_kind, source_url, publisher, published_at, occurred_at(nullable), fetched_at, source_status, verification_status(unverified/relevance_unconfirmed/supply_impact_confirmed/quality_impact_confirmed/cleared), severity, source_reliability, summary를 분리한다. 영향 지연일/업체/원료/Lot/발주 링크와 확인자·사유를 IssueLink에 기록한다. 공개 소스가 공급 차질을 완전히 포착한다고 주장하지 않는다.
@@ -100,7 +102,7 @@ POST /recommendations/{id}/approve는 expected_revision과 Idempotency-Key를 �
 
 - 계산: 기존 입고 없음, 재고 40, 일 사용 1, 조달 30일, 안전재고 5, 검토 0일 → 40에서는 발주 임계 알림 없음, 35에서 warning. 34에서 뒤늦은 경고이며 이미 수요 부족이 있는 입력은 urgent. 동일 원료의 QC 대기/QA 미승인/만료/타 생산 예약 Lot는 확정 가용량에 포함하지 않는다. 입고일보다 QC/QA 완료가 늦은 기존 PO가 중간 부족을 가리지 않아야 한다.
 - 충돌: 가장 싼 미승인 업체는 제외, 확약 없는 저가안은 납기 근거 충분안보다 아래, 냉장공간 초과/미허용 분할입고/유효기간 전 미소진/지급 한도 초과를 각각 구별해 표시한다. 배정된 Lot는 해당 생산 수요에 한 번만 사용한다.
-- 실제 브라우저: 로그인 → ERP 견적·수요 변경 → 부족·만료 위험과 기본 발주안 반영 → 네 AI 병렬 검토/SSE → Admin 통합 결과 → 담당자 선택·승인 → 내부 PO 영속 상태 확인. 1/2회 설정, 실패 역할이 있으면 Admin 미실행, 적합안 1개/0개도 확인한다. 실제 LLM 미설정 시 해당 검증 한계를 명시한다.
+- 실제 브라우저: 로그인 → ERP 견적·수요 변경 → 부족·만료 위험과 기본 발주안 반영 → 네 AI 병렬 검토/SSE → Orchestrator 통합 결과 → 담당자 선택·승인 → 내부 PO 영속 상태 확인. 1/2회 설정, 실패 역할이 있으면 Orchestrator 미실행, 적합안 1개/0개도 확인한다. 실제 LLM 미설정 시 해당 검증 한계를 명시한다.
 - 설명 가능성과 사용성: 브라우저에서 재고·물류의 공간 초과 반론으로 입고안이 수정되는 가상 시나리오를 실행한다. 추천 요약 → 해당 부서 의견 → 수정 전후 → 공간 계산과 원본 용량 레코드가 실제 ID로 연결되는지 확인한다. 원본 ERP를 수정한 후에도 과거 추천 근거는 당시 snapshot을 보여야 한다. 전체 토론을 펼치지 않고 대시보드에서 검토 대상 확인 → 대안 비교 → 위험/추가 비용 확인 → 승인까지 완료할 수 있어야 한다. 근거 없는 주장·존재하지 않는 메시지 참조는 추천 확정 전에 거부한다.
 - LLM 4종: OPENAI_API_KEY/OPENAI_MODEL, GEMINI_API_KEY/GEMINI_MODEL, OPENROUTER_API_KEY/OPENROUTER_MODEL, VLLM_BASE_URL/VLLM_MODEL 및 필요 시 VLLM_API_KEY를 구성하고 각 공급자로 같은 구조화 역할 호출을 실제 실행한다. 전체 토론은 가용한 한 공급자로 완료하고 역할별 다른 공급자 매핑도 실제 호출로 증명한다. 자격증명/실제 vLLM 서버가 없는 공급자는 검증 불가로 명시하며 mock 통과를 실제 연동 증거로 보고하지 않는다. 잘못된 키/부정확 JSON/타임아웃에서 실패가 사용자에게 보여야 한다.
 - 자동 수집: 공식 소스에서 실제 레코드를 동기화해 원문 링크/시각/원본 식별자가 DB와 /issues에 나타남을 확인한다. 동일 수집 재실행은 중복 사건을 만들지 않는다. 가상 업체와 자동 연결하지 않음, 원료명 유사 사건은 relevance_unconfirmed, 확인된 품질 링크는 후보 보류, 공급 지연 확인은 재계산, 해제는 새 이력과 재검토로 확인한다. 테스트에서는 격리된 HTTP fixture로 정정/429/실패 동작을 검증하고 실제 수집 smoke와 구분한다.

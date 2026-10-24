@@ -35,7 +35,7 @@ export default function Dashboard() {
     <PageHeading eyebrow="PROCUREMENT SITUATION" title="원료 상황부터, 함께 판단하기" description="재고·생산 수요를 확인하고, 실제 AI 협의를 거쳐 발주 여부와 시점을 결정하세요." action={<button className="button secondary" disabled={busy} onClick={async () => { setBusy(true); try { await send(`/scenarios/${scenarioId}/evaluate`, {}); await refresh(); } catch (err) { setError(err); } finally { setBusy(false); } }}><RefreshCw size={16} className={busy ? 'spin' : ''}/>재계산</button>}/>
     <ReadOnlyNotice/>
     <ErrorBox error={error || alertsQuery.error} retry={() => { refresh(); setError(undefined); }}/>
-    <div className="decision-steps" aria-label="원료 의사결정 순서"><strong>1. 부족·유효기간 확인</strong><ArrowRight size={15}/><span>2. 기본안 A/B/C</span><ArrowRight size={15}/><span>3. 4개 AI 병렬 검토</span><ArrowRight size={15}/><span>4. Admin 통합</span><ArrowRight size={15}/><span>5. 담당자 승인</span></div>
+    <div className="decision-steps" aria-label="원료 의사결정 순서"><strong>1. 부족·유효기간 확인</strong><ArrowRight size={15}/><span>2. 기본안 A/B/C</span><ArrowRight size={15}/><span>3. 4개 AI 병렬 검토</span><ArrowRight size={15}/><span>4. Orchestrator 통합</span><ArrowRight size={15}/><span>5. 담당자 승인</span></div>
     <Panel title="먼저, 어떤 상황인가요?" subtitle={`계산 기준일 ${date(planning.as_of)} · 현재 데이터가 유지될 때의 수요와 재고입니다.`} action={<select aria-label="상황을 확인할 원료" value={selected} onChange={event => setMaterial(event.target.value)}>{materials.map(item => <option key={text(item.material_id)} value={text(item.material_id)}>{text(item.name)}</option>)}</select>}>
       {current ? <div className="situation-summary" id="material-situation">
         <h3>{text(current.name)} · {text(current.code)}</h3>
@@ -64,7 +64,7 @@ export default function Dashboard() {
           <div className={`alert-symbol ${text(alert.status)}`}><TriangleAlert size={23}/></div>
           <div className="alert-main">
             <div className="alert-title"><h3>{text(item?.name) || '원료 확인 필요'}</h3><Badge value={alert.status}/><span className="subtle-code">{text(item?.code)}</span></div>
-            <p>{text(alert.message)} · 발주 적합성은 AI 병렬 검토 후 Admin이 통합 평가합니다.</p>
+            <p>{text(alert.message)} · 발주 적합성은 AI 병렬 검토 후 Orchestrator가 통합 평가합니다.</p>
             <div className="alert-meta"><span><Clock3 size={13}/>역산 검토 기한 추정 {alert.latest_order_date || item?.latest_order_date ? date(alert.latest_order_date || item?.latest_order_date) : '산정 근거 부족'}</span><span>첫 부족 예상 {date(alert.first_shortage_date || item?.first_shortage_date)}</span><span>연결된 투입 수요 {affected.length}건</span></div>
             <details className="alert-calculation"><summary>감지 근거 · 조달기간 · 영향 생산 보기</summary><div className="alert-calculation-content">
               <p>현재 계획의 생산 가용량 {quantity(item?.free_available_quantity)} {text(item?.base_unit)}</p>
@@ -91,7 +91,7 @@ export default function Dashboard() {
       <section className="discussion-invite">
         <div className="invite-decoration"><MessagesSquare size={110}/></div><span className="eyebrow">NEXT · REAL AI DISCUSSION</span><div className="invite-icon"><Sparkles size={25}/></div>
         <h2>발주가 필요한지,<br/>언제·어떻게 할지 함께 검토해요.</h2>
-        <p>네 AI가 구매·재고/생산계획·품질·재무 관점에서 동시에 검토하고 Admin이 전체 의견을 통합합니다. 최종 선택과 승인은 담당자가 합니다.</p>
+        <p>네 AI가 구매·재고/생산계획·품질·재무 관점에서 동시에 검토하고 Orchestrator가 전체 의견을 통합합니다. 최종 선택과 승인은 담당자가 합니다.</p>
         <div className="role-chips">{discussionRoles.map(role => <span key={role}>{label(role)}</span>)}</div>
         <button className="button white" onClick={start} disabled={busy || !user.id}>{busy ? '검토 요청 중…' : '현재 상황으로 AI 병렬 검토 시작'}<ArrowUpRight size={17}/></button>
         <small>현재 시나리오 전체를 검토합니다. 실제 LLM을 호출하며 미설정·호출 실패 시 오류를 표시하고 추천을 꾸미지 않습니다.</small>

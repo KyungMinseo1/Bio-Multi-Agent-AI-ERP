@@ -62,7 +62,8 @@ async def fetch(url, headers=None):
                 address = addresses[0]
                 netloc = f"[{address}]" if ":" in address else address
                 pinned = urlunsplit(("https", netloc, parsed.path or "/", parsed.query, ""))
-                request = client.build_request("GET", pinned, headers={**(headers or {}), "Host": host, "User-Agent": "BioERP/1.0 public-source collector"})
+                # FDA's abuse detection redirects bot user agents without a contact URL to a 404 apology page.
+                request = client.build_request("GET", pinned, headers={**(headers or {}), "Host": host, "User-Agent": "BioERP/1.0 (+https://github.com/KyungMinseo1/Bio-Multi-Agent-AI-ERP) public-source collector"})
                 request.extensions["sni_hostname"] = host
                 response = await client.send(request, stream=True)
                 try:

@@ -57,12 +57,12 @@ export default function Settings({ settings }: { settings: Row }) {
         </article>;
       })}</div>
       <div className="panel-footnote">설정됨은 자격증명·모델 구성 여부이며 연결 성공을 보장하지 않습니다. 실제 호출 결과는 협의 실행에 기록됩니다.</div>
-      <div className="setting-item"><span>4개 검토 AI 병렬 라운드</span><strong>{text(llm.review_rounds ?? 1)}회 · 완료 후 Admin 통합</strong></div>
-      <p className="projection-note">구매·재고 및 생산계획·품질·재무가 매 라운드 동시에 검토합니다. 2회 이상이면 다음 라운드는 직전 전체 의견을 참고하며, 설정한 모든 라운드를 마친 후 Admin이 전체 맥락을 통합합니다. 실행 도중 설정을 바꿔도 이미 시작한 협의의 라운드 수는 바뀌지 않습니다.</p>
+      <div className="setting-item"><span>4개 검토 AI 병렬 라운드</span><strong>{text(llm.review_rounds ?? 1)}회 · 완료 후 Orchestrator 통합</strong></div>
+      <p className="projection-note">구매·재고 및 생산계획·품질·재무가 매 라운드 동시에 검토합니다. 2회 이상이면 다음 라운드는 직전 전체 의견을 참고하며, 설정한 모든 라운드를 마친 후 Orchestrator가 전체 맥락을 통합합니다. 실행 도중 설정을 바꿔도 이미 시작한 협의의 라운드 수는 바뀌지 않습니다.</p>
       <details className="settings-environment">
         <summary>서버 환경변수 설정 안내</summary>
         <div className="environment-grid">
-          <div><strong>공통</strong><code>LLM_PROVIDER</code><code>LLM_TIMEOUT_SECONDS</code><code>LLM_REVIEW_ROUNDS=1</code><small>기본 1회 · 2로 설정하면 4개 AI 병렬 검토를 두 번 실행</small></div>
+          <div><strong>공통 · 통합 검토</strong><code>LLM_PROVIDER</code><code>LLM_TIMEOUT_SECONDS=60</code><code>LLM_ORCHESTRATOR_TIMEOUT_SECONDS=180</code><code>LLM_REASONING_EFFORT=low</code><code>LLM_REVIEW_ROUNDS=1</code><small>기본 1회 · 2로 설정하면 4개 AI 병렬 검토를 두 번 실행</small></div>
           <div><strong>OpenAI Responses</strong><code>OPENAI_API_KEY</code><code>OPENAI_MODEL</code><code>OPENAI_BASE_URL (선택)</code></div>
           <div><strong>Gemini</strong><code>GEMINI_API_KEY</code><code>GEMINI_MODEL</code></div>
           <div><strong>OpenRouter</strong><code>OPENROUTER_API_KEY</code><code>OPENROUTER_MODEL</code></div>
@@ -70,8 +70,11 @@ export default function Settings({ settings }: { settings: Row }) {
           <div><strong>OpenAI 호환 Chat Completions</strong><code>LLM_PROVIDER=openai_compatible</code><code>OPENAI_COMPATIBLE_BASE_URL</code><code>OPENAI_COMPATIBLE_MODEL</code><code>OPENAI_COMPATIBLE_API_KEY (선택)</code></div>
         </div>
         <p>vLLM·호환 API는 접근 가능한 /v1 기본 URL과 서버에서 제공하는 정확한 모델 ID가 모두 필요합니다. URL만으로는 연결할 수 없으며 strict JSON Schema 구조화 출력을 지원해야 합니다. vLLM은 별도 서버에서 실행하고 GPU 병렬화는 서버의 <code>vllm serve … --tensor-parallel-size …</code>로 설정합니다.</p>
+        <p>역할별 LLM_ROLE_MAPPING의 timeout(초)이 최우선이며, 없으면 Orchestrator는 전용 제한 시간(기본 180초), 나머지 역할은 공통 제한 시간(기본 60초)을 사용합니다. 변경 후 API와 worker를 모두 재시작해야 합니다. 비동기 LLM 요청 시간초과는 서버 전체 중단을 의미하지 않습니다. 시간초과는 자동 재시도하지 않으며 원본 오류와 전체 검토 근거를 보존합니다.</p>
+        <p>추론 강도는 auto·low·medium·high를 지원합니다. 빠른 판단에는 <code>LLM_REASONING_EFFORT=low</code>를 사용하며, 역할별 <code>LLM_ROLE_MAPPING</code>의 <code>reasoning_effort</code>가 공통 설정보다 우선합니다. 환경변수가 없으면 auto이며, auto는 추론 제어값을 보내지 않고 모델 기본값을 사용한다는 뜻이지 생각을 끈다는 뜻은 아닙니다.</p>
+        <p>low·medium·high는 선택한 모델과 API 서버가 해당 추론 제어를 지원해야 합니다. 미지원 오류 시 auto로 바꾸거나 자동 재시도하지 않습니다. 네이티브 Gemini는 모델별 thinking_level·thinking_budget 차이 때문에 이 연동에서 auto만 허용합니다. 공통 low와 함께 사용하려면 해당 Gemini 역할의 reasoning_effort를 auto로 명시하세요.</p>
       </details>
-      {Object.keys(roles).length > 0 && <div className="role-models"><h3>4개 검토 AI + Admin 모델 매핑</h3>{discussionRoles.map(role => <div key={role}><strong>{label(role)}</strong><code>{typeof roles[role] === 'string' ? text(roles[role]) : `${text(record(roles[role]).provider)} / ${text(record(roles[role]).model)}`}</code></div>)}</div>}
+      {Object.keys(roles).length > 0 && <div className="role-models"><h3>4개 검토 AI + Orchestrator 모델 매핑</h3>{discussionRoles.map(role => <div key={role}><strong>{label(role)}</strong><code>{typeof roles[role] === 'string' ? text(roles[role]) : `${text(record(roles[role]).provider)} / ${text(record(roles[role]).model)}`}</code><small>요청 제한 시간 {text(record(roles[role]).timeout)}초 · 추론 강도 {text(record(roles[role]).reasoning_effort)}</small>{record(roles[role]).configuration_error != null && <small className="danger-text">{text(record(roles[role]).configuration_error)}</small>}</div>)}</div>}
     </Panel>
     <Panel title="공식 외부 수집 소스" subtitle="승인 담당자가 공식 도메인과 소유 관계를 확인한 후 등록합니다." action={<button className="button primary small" disabled={!allowed} onClick={() => setEditing({})}><Plus size={15}/>소스 추가</button>}>
       <div className="table-scroll"><table>
