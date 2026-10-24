@@ -6,7 +6,7 @@ export default function CandidateComparison({ candidates, compact = false, stage
   return <div className={`candidate-grid ${compact ? 'compact' : ''}`}>{candidates.map((candidate, index) => {
     const validation = record(candidate.validation); const costs = record(candidate.costs); const valid = validation.hard_constraints_passed === true; const reasons = rows(validation.reasons); const warnings = rows(validation.warnings);
     return <article className={`candidate-card ${stage === 'recommendation' && index === 0 && valid ? 'recommended' : ''}`} key={text(candidate.id)}>
-      <div className="candidate-top"><span className="candidate-number">{String(index + 1).padStart(2, '0')}</span><Badge value={!valid ? 'infeasible' : validation.requires_budget_approval ? 'requires_budget_approval' : 'feasible'}>{!valid ? '계산상 제약 위반' : validation.requires_budget_approval ? '별도 예산 승인 필요' : '계산상 제약 통과'}</Badge></div>
+      <div className="candidate-top"><span className="candidate-number">{String(index + 1).padStart(2, '0')}</span><Badge value={!valid ? 'infeasible' : validation.requires_budget_approval ? 'requires_budget_approval' : 'feasible'}/></div>
       <h3>{text(candidate.name)}</h3>
       <p className="projection-note">{stage === 'calculation' ? '협의 전 잠정 계산 · 적합성 판단과 AI 추천은 아직 아닙니다.' : '실제 AI 협의의 추천 · 담당자의 최종 선택과 승인이 필요합니다.'}</p>
       <p className="candidate-quantity">주문 수량 <strong>{quantity(candidate.quantity)}</strong></p>

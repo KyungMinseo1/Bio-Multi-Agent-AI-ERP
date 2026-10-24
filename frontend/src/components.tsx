@@ -52,8 +52,8 @@ export function Timeline({ items, evidence }: { items: unknown; evidence?: Row[]
   return <div className="timeline">{rows(items).map((item, index) => <div className="timeline-item" key={text(item.id) || `${text(item.date)}-${index}`}>
     <span className="timeline-dot"/><time>{date(item.date || item.arrival_date)}</time>
     <div><strong>{label(item.event || '입고 예정')}</strong>
-      <p>{display(item.quantity)} · 가용 {display(item.available_quantity)}{item.available_date ? ` · 사용 가능 예상 ${date(item.available_date)}` : ''}</p>
-      {Number(item.shortage_quantity || 0) > 0 && <Badge value="urgent">수요 미충족 {display(item.shortage_quantity)}</Badge>}
+      <p>{display(item.quantity)} · {item.event === 'opening' ? '기준 가용' : '계획상 예상 가용'} {display(item.available_quantity)}{item.available_date ? ` · 사용 가능 예상 ${date(item.available_date)}` : ''}</p>
+      {Number(item.shortage_quantity || 0) > 0 && <Badge value="urgent">계획상 수요 부족 {display(item.shortage_quantity)}</Badge>}
       <Evidence refs={item.evidence_refs} extra={evidence}/>
     </div>
   </div>)}</div>;

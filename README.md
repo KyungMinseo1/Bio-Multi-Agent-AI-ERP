@@ -109,6 +109,8 @@ npm run build
 - 실제 LLM 인증 정보와 vLLM 서버는 제공되지 않아 실제 여덟 역할 협의 및 그 결과를 이용한 브라우저 승인 완료는 검증하지 않았다. 승인 트랜잭션은 격리된 회귀 테스트로 검증했으며 실제 LLM 연동 증거와 구별한다.
 - backend(Python 3.12)·frontend(Node 22/nginx) Docker 이미지 빌드 성공. 별도 PostgreSQL 16 컨테이너에 마이그레이션·seed 후 API/worker/nginx 컨테이너를 연결해 로그인·견적 수정·재계산·브라우저 대시보드 반영 및 DB의 worker 작업 완료를 확인했다. Compose 명령 전체를 그대로 실행한 검증과는 구별한다.
 - 컨테이너의 실제 외부 수집에서는 openFDA·공급업체 RSS가 성공했지만 MedWatch가 HTTP 404를 반환했다. 실패 상태가 DB에 남으며 이 상태에서는 승인 직전 최신 정보 확인 조건을 충족하지 못한다. 호스트 수집 성공이 모든 실행 환경에서의 소스 가용성을 보장하지 않는다.
+- 상황 우선 UI 변경 후 `docker compose up -d --build api worker web` 실행 성공, 백엔드 40개 테스트 통과(기존 warning 2건). 브라우저에서 IL-7 장부 6·생산 가용 2·수요 12·추가 필요량 12, 실제 발주일 미정, 잠정 후보 기본 접힘 및 펼침, 협의 전 추천 없음, OpenAI 호환 API 설정 카드 표시를 확인했다.
+- 임시 로컬 HTTP 서버로 `vllm`·`openai_compatible`의 `/v1/chat/completions` 요청, 모델 ID·strict JSON Schema 전송, 정상 응답 파싱 및 잘못된 구조화 응답 거부를 확인했다. 이는 실제 vLLM 모델 추론이나 여덟 역할 협의 완료 검증이 아니다.
 
 ## 계산 주의사항
 
