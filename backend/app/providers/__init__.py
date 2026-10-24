@@ -4,7 +4,7 @@ from openai import AsyncOpenAI
 from google import genai
 from google.genai import types
 from jsonschema import Draft202012Validator
-from ..config import setting, role_mapping
+from ..config import CANONICAL_ROLES, setting, role_mapping, review_rounds
 from ..schemas import DepartmentTurn
 
 NAMES = ("openai", "gemini", "openrouter", "vllm", "openai_compatible")
@@ -21,6 +21,8 @@ def configuration(role=None):
     mappings = role_mapping()
     mapping = mappings.get(role, {}) if role else {}
     error = mappings.get("__configuration_error__")
+    if role is not None and role not in CANONICAL_ROLES:
+        error = "Unknown department role"
     if isinstance(mapping, str):
         mapping = {"provider": mapping}
     if not isinstance(mapping, dict):
@@ -43,12 +45,20 @@ def configuration(role=None):
 
 
 def public_settings():
-    roles = {r: {key: value for key, value in configuration(r).items() if key != "base_url"} for r in ("purchasing", "inventory_logistics", "production_management", "production", "qc", "qa", "finance", "admin")}
-    return {"provider": setting("LLM_PROVIDER"), "configured": all(value["configured"] for value in roles.values()), "providers": {name: {"configured": bool(setting(f"{name.upper()}_MODEL")) and bool(setting(f"{name.upper()}_BASE_URL")) if name in {"vllm", "openai_compatible"} else bool(setting(f"{name.upper()}_MODEL") and setting(f"{name.upper()}_API_KEY")), "model": setting(f"{name.upper()}_MODEL")} for name in NAMES}, "roles": roles}
+    roles = {r: {key: value for key, value in configuration(r).items() if key != "base_url"} for r in CANONICAL_ROLES}
+    try:
+        rounds, error = review_rounds(), None
+    except ValueError as exc:
+        rounds, error = None, str(exc)
+    return {"provider": setting("LLM_PROVIDER"), "configured": not error and all(value["configured"] for value in roles.values()), "review_rounds": rounds, "configuration_error": error, "providers": {name: {"configured": bool(setting(f"{name.upper()}_MODEL")) and bool(setting(f"{name.upper()}_BASE_URL")) if name in {"vllm", "openai_compatible"} else bool(setting(f"{name.upper()}_MODEL") and setting(f"{name.upper()}_API_KEY")), "model": setting(f"{name.upper()}_MODEL")} for name in NAMES}, "roles": roles}
 
 
 def require_configuration():
-    for role in ("purchasing", "inventory_logistics", "production_management", "production", "qc", "qa", "finance", "admin"):
+    try:
+        review_rounds()
+    except ValueError as exc:
+        raise ProviderError("configuration_error", str(exc)) from None
+    for role in CANONICAL_ROLES:
         if not configuration(role)["configured"]:
             raise ProviderError("configuration_error", f"Configure provider credentials and explicit model for {role}", role)
 

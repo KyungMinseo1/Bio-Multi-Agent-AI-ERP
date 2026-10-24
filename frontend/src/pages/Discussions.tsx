@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, CheckCircle2, ChevronRight, CircleDot, GitBranch, Loader2, MessagesSquare, Plus, Radio, ShieldCheck, TriangleAlert } from 'lucide-react';
-import { api, display, label, money, number, record, rows, send, text, time, type Row } from '../api';
+import { api, discussionRoles, display, label, money, number, record, rows, send, text, time, type Row } from '../api';
 import { Badge, Empty, ErrorBox, Evidence, Loading, Modal, PageHeading, Panel, ReadOnlyNotice, RecordDetails, Success, useWorkspace } from '../components';
 import CandidateComparison from '../CandidateComparison';
 function Approval({ recommendation, close, approved }: { recommendation: Row; close: () => void; approved: (po: Row) => void }) {
@@ -15,6 +15,7 @@ export default function Discussions() {
   const { id } = useParams(); const { scenarioId, scenario, user, refresh } = useWorkspace(); const navigate = useNavigate();
   const [error, setError] = useState<unknown>(); const [busy, setBusy] = useState(false); const [approval, setApproval] = useState<Row | null>(null); const [po, setPo] = useState<Row | null>(null); const [connected, setConnected] = useState(false); const [evidenceRun, setEvidenceRun] = useState(false);
   const listQuery = useQuery({ queryKey: ['discussions', scenarioId], queryFn: () => api(`/scenarios/${scenarioId}/discussions`) });
+  const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: () => api('/settings') });
   const runQuery = useQuery({ queryKey: ['discussion', scenarioId, id], queryFn: () => api(`/discussions/${id}`), enabled: !!id, refetchInterval: query => ['queued', 'running'].includes(text(record(query.state.data).status)) ? 2500 : false });
   const run = record(runQuery.data); const belongs = !run.scenario_id || run.scenario_id === scenarioId; const status = text(run.status); const active = status === 'running' || status === 'queued';
   const stale = status === 'stale' || (run.snapshot_revision != null && number(run.snapshot_revision) !== number(scenario.revision));
@@ -32,11 +33,19 @@ export default function Discussions() {
   const recommendations = rows(run.recommendations).sort((a, b) => number(a.rank) - number(b.rank)); const messages = rows(run.messages); const strategies = rows(run.strategies); const progress = record(run.progress);
   const latestMessages = Array.from(new Map(messages.map(message => [text(message.role), message] as const)).values());
   const snapshot = record(run.snapshot); const snapshotEvidence = [...rows(record(run.calculation || snapshot.planning).evidence), ...messages, ...strategies, ...Object.values(record(snapshot.data || snapshot)).flatMap(value => rows(value))];
+  const frozenRounds = number(record(run.calculation).review_rounds);
+  const configuredRounds = number(record(record(settingsQuery.data).llm).review_rounds) || 1;
+  const reviewRounds = frozenRounds || configuredRounds;
+  const historicalRoles = Array.from(new Set([...messages.map(message => text(message.role)), ...Object.keys(progress)]))
+    .filter(role => ['procurement', 'inventory', 'inventory_logistics', 'production_management', 'production_planning', 'production', 'qc', 'qa'].includes(role));
+  const isHistorical = !frozenRounds && historicalRoles.length > 0;
+  const visibleRoles: string[] = isHistorical ? [...new Set([...messages.map(message => text(message.role)), ...Object.keys(progress).filter(role => typeof progress[role] === 'string')])] : [...discussionRoles];
+  const currentRound = number(progress.round) || Math.max(0, ...messages.filter(message => message.role !== 'admin').map(message => number(message.version)));
   return <>
-    <PageHeading eyebrow="MULTI-AGENT DELIBERATION" title={id ? '부서별 협의 · 의사결정' : '부서별 AI 협의'} description={id ? '실제 부서별 검토, 계산 근거와 남은 이견을 확인하고 담당자가 최종 판단합니다.' : '재고·수요 상황에서 시작해 발주 필요성, 공급안과 시점을 여덟 역할이 검토합니다.'} action={<button className="button primary" disabled={busy || !user.id} onClick={start}><Plus size={17}/>{busy ? '실행 요청 중…' : id ? '현재 데이터로 새 협의' : '현재 상황으로 AI 협의 시작'}</button>}/>
+    <PageHeading eyebrow="PARALLEL AI REVIEW" title={id ? 'AI 검토 결과 · Admin 통합' : 'AI 병렬 검토'} description={id ? '실제 AI 검토, 계산 근거와 남은 이견을 확인하고 담당자가 최종 판단합니다.' : `4개 AI가 ${configuredRounds}회 병렬 검토한 뒤 Admin이 모든 맥락을 통합해 최선의 안을 제안합니다.`} action={<button className="button primary" disabled={busy || !user.id} onClick={start}><Plus size={17}/>{busy ? '실행 요청 중…' : id ? '현재 데이터로 새 검토' : '현재 상황으로 AI 병렬 검토 시작'}</button>}/>
     <ReadOnlyNotice/>
     <ErrorBox error={error || listQuery.error || runQuery.error}/>
-    <div className="decision-steps" aria-label="원료 의사결정 순서"><span>1. 상황 파악</span><ChevronRight size={15}/><strong>2. 부서별 AI 협의</strong><ChevronRight size={15}/><span>3. 추천·이견 확인</span><ChevronRight size={15}/><span>4. 담당자 선택·승인</span></div>
+    <div className="decision-steps" aria-label="원료 의사결정 순서"><span>1. 부족·유효기간 확인</span><ChevronRight size={15}/><span>2. 기본안 A/B/C</span><ChevronRight size={15}/><strong>3. 4개 AI 병렬 검토</strong><ChevronRight size={15}/><span>4. Admin 통합</span><ChevronRight size={15}/><span>5. 담당자 승인</span></div>
     <div className="notice"><MessagesSquare size={17}/>계산 후보는 검토 자료이며 추천이 아닙니다. 실제 협의가 발주 필요성과 공급안·시점을 검토합니다. 역산 기한과 미래 QC/QA 완료일은 추정이며, 실제 발주일은 담당자 결정 전 미정입니다.</div>
     {po && <Success><strong>내부 발주가 등록되었습니다 · {text(po.code || po.id)}</strong><p>외부 전송 없음 · 승인으로 QC/QA 상태는 변경되지 않습니다.</p><button className="text-button" onClick={() => navigate('/erp/purchase-orders')}>내부 발주 목록 보기 →</button></Success>}
     {!id ? <>
@@ -50,14 +59,14 @@ export default function Discussions() {
       {evidenceRun && <Panel title="협의 원본 스냅샷" subtitle="현재 ERP가 아니라 협의 시작 당시 저장된 데이터입니다."><RecordDetails row={snapshot}/></Panel>}
       {stale && <div className="error-box"><TriangleAlert size={20}/><div><strong>협의 이후 ERP 입력이 변경되었습니다</strong><p>과거 근거는 보존되지만 이전 추천을 승인할 수 없습니다. 현재 데이터로 새 협의를 실행하세요.</p></div></div>}
       {run.error != null && <ErrorBox error={typeof run.error === 'string' ? new Error(run.error) : new Error(display(run.error))}/>}
-      <Panel title="역할별 진행 상태" subtitle="대기·실행·완료 상태는 저장된 실제 실행 기록에서 가져옵니다.">
-        <div className="role-progress">{['purchasing', 'inventory_logistics', 'production_management', 'production', 'qc', 'qa', 'finance', 'admin'].map(role => {
+      <Panel title={isHistorical ? '저장된 과거 역할별 진행 상태' : `4개 AI 병렬 검토 → Admin 통합 · ${currentRound ? `${Math.min(currentRound, reviewRounds)} / ${reviewRounds}라운드` : `총 ${reviewRounds}라운드 대기`}`} subtitle={isHistorical ? '이 실행 당시의 역할과 실제 기록을 그대로 표시합니다.' : '각 라운드에서 구매·재고 및 생산계획·품질·재무가 동시에 검토합니다. 다음 라운드는 직전 전체 의견을 참고하고, 모든 라운드 후 Admin이 통합 판단합니다.'}>
+        <div className="role-progress" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>{visibleRoles.map(role => {
           const roleMessages = messages.filter(message => message.role === role); const state = text(progress[role]) || (roleMessages.length ? 'completed' : 'pending');
           return <div className={`role-state ${state}`} key={role}><span>{state === 'completed' ? <CheckCircle2 size={18}/> : state === 'running' ? <Loader2 size={18} className="spin"/> : <CircleDot size={18}/>}</span><strong>{label(role)}</strong><small>{label(state)}</small></div>;
         })}</div>
       </Panel>
       <section className="recommendation-section">
-        <div className="section-heading"><div><span className="eyebrow">3 · DISCUSSION OUTCOME</span><h2>AI 협의가 제안한 추천안</h2><p>실제 역할 의견과 계산 재검증을 거친 결과입니다. 추천 이유·이견·조건부 일정을 확인한 뒤 담당자가 선택·승인하세요. 추천은 QC/QA 사용 승인이 아닙니다.</p></div></div>
+        <div className="section-heading"><div><span className="eyebrow">4 · ADMIN OUTCOME</span><h2>Admin 통합 추천 · 우선순위</h2><p>실제 검토 의견과 전체 맥락을 통합해 Admin이 정한 추천 순서입니다. 기본 계산의 비용 순서가 아닙니다. 추천 이유·이견·조건부 일정을 확인한 뒤 담당자가 선택·승인하세요. 추천은 QC/QA 사용 승인이 아닙니다.</p></div></div>
         {recommendations.length ? <CandidateComparison stage="recommendation" candidates={recommendations.map(item => ({ ...record(item.candidate), recommendation_id: item.id }))} action={candidate => {
           const recommendation = recommendations.find(item => item.id === candidate.recommendation_id)!;
           return <>
@@ -70,15 +79,15 @@ export default function Discussions() {
       <Panel title="협의 당시 참고 계산과 제약 위반 사유" subtitle="수치 검증은 부서별 적합성 판단이나 실제 품질 승인이 아닙니다. 과거 계산은 현재 ERP 데이터로 덮어쓰지 않습니다.">
         <details className="historical-candidates"><summary>당시 전체 계산 후보 보기 ({rows(record(run.calculation).candidates).length}개)</summary><CandidateComparison candidates={rows(record(run.calculation).candidates)} evidence={snapshotEvidence}/><details><summary>버전별 검증 원본</summary><pre>{JSON.stringify(run.validations || [], null, 2)}</pre></details></details>
       </Panel>
-      <Panel title="부서별 의견과 남은 이견" subtitle="의견은 계산 검증 근거와 구분합니다. 남은 반대·추가 확인 요청을 숨기지 않습니다.">
+      <Panel title="AI별 검토 의견과 남은 이견" subtitle="의견은 계산 검증 근거와 구분합니다. 남은 반대·추가 확인 요청을 숨기지 않습니다.">
         {messages.length ? <div className="department-summary">{latestMessages.map(message => <article key={text(message.id)}>
-          <div className="department-heading"><span className="department-avatar">{label(message.role).slice(0, 2)}</span><div><strong>{label(message.role)}</strong><small>전략 v{text(message.version)}</small></div><Badge value={message.position}/></div>
+          <div className="department-heading"><span className="department-avatar">{label(message.role).slice(0, 2)}</span><div><strong>{label(message.role)}</strong><small>{isHistorical ? `전략 v${text(message.version)}` : message.role === 'admin' ? '전체 라운드 통합 판단' : `병렬 검토 ${text(message.version)} / ${reviewRounds}라운드`}</small></div><Badge value={message.position}/></div>
           <h3>{typeof message.proposal === 'string' ? message.proposal : text(record(message.proposal).summary) || '전략 검토 의견'}</h3>
           {message.reasons != null && <div className="department-reasons">{Array.isArray(message.reasons) ? message.reasons.map((reason, index) => <p key={index}>{typeof reason === 'string' ? reason : display(record(reason).message || reason)}</p>) : <p>{display(message.reasons)}</p>}</div>}
           <details><summary>영향 · 변경 요청</summary><h4>영향</h4><pre>{JSON.stringify(message.impacts, null, 2)}</pre><h4>변경 요청</h4><pre>{JSON.stringify(message.change_requests, null, 2)}</pre></details><Evidence refs={message.evidence_refs} extra={snapshotEvidence}/>
         </article>)}</div> : <Empty title="아직 저장된 역할 의견이 없습니다"/>}
       </Panel>
-      <Panel title="전략 버전과 변경 이력" subtitle="원본 제안은 덮어쓰지 않고 버전별로 보존합니다.">
+      <Panel title={isHistorical ? '전략 버전과 변경 이력' : '라운드별 검토 전략과 변경 이력'} subtitle="원본 제안은 덮어쓰지 않고 버전별로 보존합니다.">
         {strategies.length ? <div className="strategy-list">{strategies.map((strategy, index) => {
           const previous = strategies[index - 1]; const keys = previous ? Object.keys(strategy).filter(key => !['id', 'created_at', 'version'].includes(key) && JSON.stringify(strategy[key]) !== JSON.stringify(previous[key])) : [];
           return <details key={text(strategy.id)}><summary><GitBranch size={17}/><strong>전략 v{text(strategy.version) || index + 1}</strong><span>{index === 0 ? '최초 제안' : `이전 버전 대비 ${keys.length}개 항목 변경`}</span></summary>{previous && keys.map(key => <div className="version-diff" key={key}><strong>{key}</strong><div><span>이전</span><pre>{JSON.stringify(previous[key], null, 2)}</pre></div><div><span>수정</span><pre>{JSON.stringify(strategy[key], null, 2)}</pre></div></div>)}<RecordDetails row={strategy}/></details>;

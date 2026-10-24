@@ -35,8 +35,11 @@ export const labels: Record<string, string> = {
   queued: '대기 중', running: '협의 진행 중', awaiting_review: '검토 · 승인 대기', completed: '완료', failed: '실패', stale: '입력 변경 · 재협의 필요', approved: '승인', pending: '대기', passed: '합격', rejected: '반려',
   unverified: '미확인', relevance_unconfirmed: '관련성 미확인', supply_impact_confirmed: '공급 영향 확인', quality_impact_confirmed: '품질 영향 확인', cleared: '해제 확인',
   accept: '동의', object: '이견', needs_information: '추가 확인', feasible: '계산상 제약 통과', infeasible: '계산상 제약 위반', requires_budget_approval: '별도 예산 승인 필요', configuration_error: '연결 설정 필요', synthetic: '합성 자료',
-  procurement: '구매', purchasing: '구매', inventory: '재고·물류', inventory_logistics: '재고·물류', production_management: '생산관리', production_planning: '생산관리', production: '생산', qc: 'QC', qa: 'QA', finance: '재무', admin: 'Admin',
+  purchasing: '구매 (사용자 Buyer AI)', inventory_planning: '재고·생산계획', quality: '품질 (QC·QA)', finance: '재무', admin: 'Admin',
+  procurement: '구매', inventory: '재고·물류', inventory_logistics: '재고·물류', production_management: '생산관리', production_planning: '생산관리', production: '생산', qc: 'QC', qa: 'QA',
   operator: '운영 담당자', approver: '승인 담당자', openfda: 'openFDA', rss: 'RSS', cold: '냉장', frozen: '냉동', ambient: '상온', true: '예', false: '아니오',
   opening: '기준일 승인 재고', quality_release_forecast: 'QC/QA 완료 예상', expiry: '유효기간 경과', production_use: '생산 투입', demand: '예정 수요', refrigerated: '냉장', hold: '품질 보류', cancelled: '취소', selected: '내부 발주 등록 완료', proposed: '검토 대기', vial: '바이알',
 };
+export const reviewerRoles = ['purchasing', 'inventory_planning', 'quality', 'finance'] as const;
+export const discussionRoles = [...reviewerRoles, 'admin'] as const;
 export const label = (value: unknown): string => labels[String(value)] || display(value);

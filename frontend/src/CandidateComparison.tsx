@@ -6,17 +6,25 @@ export default function CandidateComparison({ candidates, compact = false, stage
   return <div className={`candidate-grid ${compact ? 'compact' : ''}`}>{candidates.map((candidate, index) => {
     const validation = record(candidate.validation); const costs = record(candidate.costs); const valid = validation.hard_constraints_passed === true; const reasons = rows(validation.reasons); const warnings = rows(validation.warnings);
     return <article className={`candidate-card ${stage === 'recommendation' && index === 0 && valid ? 'recommended' : ''}`} key={text(candidate.id)}>
-      <div className="candidate-top"><span className="candidate-number">{String(index + 1).padStart(2, '0')}</span><Badge value={!valid ? 'infeasible' : validation.requires_budget_approval ? 'requires_budget_approval' : 'feasible'}/></div>
+      <div className="candidate-top"><span className="candidate-number">{stage === 'calculation' ? text(candidate.plan_label) || `안 ${index + 1}` : `${index + 1}순위`}</span>{stage === 'recommendation' && <Badge value={!valid ? 'infeasible' : validation.requires_budget_approval ? 'requires_budget_approval' : 'feasible'}/>}</div>
       <h3>{text(candidate.name)}</h3>
-      <p className="projection-note">{stage === 'calculation' ? '협의 전 잠정 계산 · 적합성 판단과 AI 추천은 아직 아닙니다.' : '실제 AI 협의의 추천 · 담당자의 최종 선택과 승인이 필요합니다.'}</p>
+      <p className="projection-note">{stage === 'calculation' ? '협의 전 기본 수치 · 아래 표시는 구분용이며 순위가 아닙니다.' : 'Admin이 통합 검토한 추천 순서 · 담당자의 최종 선택과 승인이 필요합니다.'}</p>
       <p className="candidate-quantity">주문 수량 <strong>{quantity(candidate.quantity)}</strong></p>
       <div className="candidate-cost"><span>예상 총비용</span><strong>{money(costs.total)}</strong><small>구매 + 운송 + 보관 + 시험 + 예상 폐기</small></div>
-      <div className="candidate-checks">
+      {stage === 'recommendation' ? <div className="candidate-checks">
         <div>{valid ? <CheckCircle2 size={16}/> : <CircleAlert size={16}/>}등록 조건 계산 {valid ? '통과' : '위반 / 확인 필요'}</div>
         <div>{validation.target_delivery_met ? <CheckCircle2 size={16}/> : <CircleAlert size={16}/>}목표 투입일 {validation.target_delivery_met ? '대응 가능 예상' : '대응 어려움 / 확인 필요'}</div>
         <div><Truck size={16}/>공급 근거: {label(validation.supply_evidence_level)}</div>
         <div>{validation.cash_feasible ? <CheckCircle2 size={16}/> : <CircleAlert size={16}/>}지급일 현금 한도 {validation.cash_feasible ? '계산상 한도 내' : '초과 / 확인 필요'}</div>
-      </div>
+      </div> : <div className="candidate-residuals">
+        <KeyValue label="공급 근거" value={label(validation.supply_evidence_level)}/>
+        <KeyValue label="입고 회차" value={`${rows(candidate.deliveries).length}회`}/>
+        {rows(candidate.deliveries).map((delivery, i) => <div key={text(delivery.id) || i}>
+          <KeyValue label={`${i + 1}회 · 입고 / 수량`} value={`${date(delivery.arrival_date)} / ${quantity(delivery.quantity)}`}/>
+          <KeyValue label="QC/QA 후 사용 가능 예상" value={date(delivery.available_date)}/>
+          <KeyValue label="유효일 가정" value={date(delivery.expiry_date)}/>
+        </div>)}
+      </div>}
       <div className="candidate-residuals">
         <KeyValue label="최종 투입 후 예상 가용 잔량" value={quantity(candidate.remaining_quantity)}/>
         <KeyValue label="기한 내 미소진 · 예상 폐기" value={quantity(candidate.expected_disposal_quantity)}/>
@@ -43,7 +51,7 @@ export default function CandidateComparison({ candidates, compact = false, stage
         <p className="projection-note">미확약 입고는 제외합니다. 미래 QC/QA 완료는 실제 승인 전 예측치입니다.</p>
         <Timeline items={candidate.timeline} evidence={evidence}/>
       </details>}
-      {reasons.length > 0 && <div className="candidate-reasons">{reasons.map((reason, i) => <div key={i}><p><CircleAlert size={14}/>{text(reason.message || reason.code)}</p><Evidence refs={reason.evidence_refs} extra={evidence}/></div>)}</div>}
+      {reasons.length > 0 && <details className="risk-details"><summary>계산 근거 · 추가 확인사항 {reasons.length}건</summary>{reasons.map((reason, i) => <div key={i}><p>{text(reason.message || reason.code)}</p><Evidence refs={reason.evidence_refs} extra={evidence}/></div>)}</details>}
       {warnings.length > 0 && <details className="risk-details"><summary>잔여 위험 · 확인사항 {warnings.length}건</summary>{warnings.map((warning, i) => <div key={i}><p>{display(warning.message || warning.code)}</p><Evidence refs={warning.evidence_refs} extra={evidence}/></div>)}</details>}
       <Evidence refs={candidate.evidence_refs} extra={evidence}/>
       {action && <div className="candidate-action">{action(candidate)}</div>}

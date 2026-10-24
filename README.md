@@ -1,7 +1,7 @@
 # Bio-Multi-Agent-AI-ERP
 
 <<<<<<< HEAD
-합성 바이오 원료 데이터로 발주 의사결정을 시연하는 독립 웹 ERP. 한국어 화면에서 시나리오 선택 → ERP 입력 → 수치 검증 → 실제 LLM 부서 협의 → 사람 승인 → **내부 발주 등록**을 수행한다. 공급업체에 주문을 전송하지 않으며, 발주 승인은 QC/QA 사용 승인이 아니다.
+합성 바이오 원료 데이터로 발주 의사결정을 시연하는 독립 웹 ERP. 상황·부족량·만료 위험 → 기본 발주안 A/B/C → 구매·재고/생산계획·품질·재무 AI 병렬 검토 → Admin 통합 선정 → 담당자 선택·승인 → **내부 발주 등록**을 수행한다. 공급업체에 주문을 전송하지 않으며, 발주 승인은 QC/QA 사용 승인이 아니다.
 
 ## 실행
 
@@ -62,7 +62,39 @@ Chat Completions 공급자(vLLM·일반 호환 API·OpenRouter)는 `response_for
 
 `LLM_ROLE_MAPPING`은 역할별 공급자/모델 JSON 설정이다. 키는 환경변수에만 두며 화면에는 설정 여부만 표시한다. 토론 실행에는 API 외에 worker가 필요하다. 미설정·인증 실패·타임아웃·잘못된 구조화 응답은 실패로 표시한다.
 
-예: `LLM_ROLE_MAPPING={"qc":{"provider":"gemini","model":"사용할-모델-ID"},"finance":{"provider":"openai","model":"사용할-모델-ID"}}`. 나머지 역할은 `LLM_PROVIDER`와 해당 공급자의 모델 설정을 사용한다. 각 역할에 `base_url`, `timeout`을 지정하면 해당 공급자의 기본 URL·공통 제한 시간을 재정의한다(예: `{"purchasing":{"provider":"openai_compatible","model":"서버의-모델-ID","base_url":"http://inference-host:8000/v1"}}`). API 키는 해당 공급자의 환경변수에서만 읽는다. 역할 키는 `purchasing`, `inventory_logistics`, `production_management`, `production`, `qc`, `qa`, `finance`, `admin`이다.
+예: `LLM_ROLE_MAPPING={"quality":{"provider":"gemini","model":"사용할-모델-ID"},"finance":{"provider":"openai","model":"사용할-모델-ID"}}`. 나머지 역할은 `LLM_PROVIDER`와 해당 공급자의 모델 설정을 사용한다. 각 역할에 `base_url`, `timeout`을 지정하면 기본 URL·공통 제한 시간을 재정의한다. API 키는 해당 공급자의 환경변수에서만 읽는다. 활성 역할 키는 `purchasing`, `inventory_planning`, `quality`, `finance`, `admin`이다. 이전의 분리된 재고·생산·QC·QA 역할 매핑은 새 역할로 변경해야 한다.
+
+### 병렬 검토 횟수
+
+`LLM_REVIEW_ROUNDS=1`이 기본이며 허용 범위는 정수 1–5다. 잘못된 값은 실행 전에 설정 오류로 표시한다. 구매 AI도 다른 세 AI와 동시에 같은 발주안들을 검토하며 선행 제안 단계를 만들지 않는다. `2`이면 네 AI가 첫 회차 전체 의견을 공유받아 다시 병렬 검토하고, 모든 회차가 끝난 뒤 Admin이 전체 근거와 잔여 이견으로 최적 제안을 선정한다. 실행 생성 시 횟수를 스냅샷에 저장하므로 대기 중 환경변수가 바뀌어도 해당 실행의 횟수는 바뀌지 않는다. 정상 호출 수는 `4 × 회차 + Admin 1회`이며 구조화 응답 교정 호출은 별도다.
+
+대시보드 기본안은 검토 전 수량·비용·회차별 일정·예상 폐기를 비교하는 자료다. 추천·적합성·순위 레이블은 붙이지 않으며, 실제 검토 후 Admin 결과에서만 추천 이유와 위험을 표시한다.
+
+### 외부 vLLM 서버 연결 예
+
+GPU 서버에서 모델을 먼저 실행한다. 다음 모델 경로·GPU 수·API 키는 배포 환경에 맞게 바꾼다.
+
+```sh
+vllm serve /models/your-model --served-model-name bio-erp --host 0.0.0.0 --port 8000 --tensor-parallel-size 2 --api-key YOUR_SERVER_KEY
+```
+
+ERP의 `.env`에는 **API와 worker에서 접근 가능한 GPU 서버 주소**를 쓴다.
+
+```dotenv
+LLM_PROVIDER=vllm
+VLLM_BASE_URL=http://192.168.0.50:8000/v1
+VLLM_MODEL=bio-erp
+VLLM_API_KEY=YOUR_SERVER_KEY
+LLM_REVIEW_ROUNDS=1
+LLM_TIMEOUT_SECONDS=60
+LLM_ROLE_MAPPING={}
+```
+
+`192.168.0.50`은 예시이므로 실제 서버 IP/DNS로 바꾼다. Docker Desktop과 같은 호스트에서 vLLM을 실행하면 `http://host.docker.internal:8000/v1`을 사용한다. 인증 없는 서버는 `--api-key`를 생략하고 `VLLM_API_KEY=`로 둔다. GPU 한 개이면 병렬 크기를 `1`로 바꾼다. `VLLM_MODEL`은 모델 경로가 아니라 위 `--served-model-name`과 일치해야 한다.
+
+서버 접근과 모델 이름은 `curl -H "Authorization: Bearer YOUR_SERVER_KEY" http://192.168.0.50:8000/v1/models`로 확인할 수 있다. 모델 목록 조회 성공만으로 구조화 응답 지원이 검증되지는 않는다. 실제 검토 실행에도 strict JSON Schema 지원이 필요하다. API 키를 쓰는 외부 연결은 신뢰된 사설망 또는 HTTPS로 보호하고 포트를 공개 노출하지 않는다.
+
+환경변수 변경 후 `docker compose up -d --build api worker web`으로 반영한다. 일반 OpenAI 호환 서버라면 `LLM_PROVIDER=openai_compatible` 및 `OPENAI_COMPATIBLE_BASE_URL`, `OPENAI_COMPATIBLE_MODEL`, `OPENAI_COMPATIBLE_API_KEY`에 같은 값을 설정한다.
 
 ## 검증과 개발
 
@@ -100,17 +132,18 @@ npm run build
 
 ### 이번 구현의 실행 확인
 
-- 백엔드 테스트 40개 통과. 설치된 Starlette/httpx 조합에서 의존성 deprecation warning 2건이 남는다.
+- 백엔드 테스트 51개 통과. 설치된 Starlette/httpx 조합에서 의존성 deprecation warning 2건이 남는다.
 - TypeScript 검사 및 Vite production build 통과.
 - 임시 SQLite DB에서 마이그레이션·계정 로그인·실제 API/worker 실행 확인.
 - 실제 브라우저에서 시나리오 선택/새로고침 유지, 견적 폼 저장, 독립 시나리오 데이터 불변, 미설정 LLM 오류 표시 확인.
 - 반복 seed가 수정한 견적과 revision을 보존함을 확인.
 - 공식 MedWatch 수동 수집 20건 저장, worker의 openFDA 및 공급업체 RSS 실제 동기화 성공과 DB 작업 완료 상태 확인.
-- 실제 LLM 인증 정보와 vLLM 서버는 제공되지 않아 실제 여덟 역할 협의 및 그 결과를 이용한 브라우저 승인 완료는 검증하지 않았다. 승인 트랜잭션은 격리된 회귀 테스트로 검증했으며 실제 LLM 연동 증거와 구별한다.
+- 실제 LLM 인증 정보와 vLLM 서버는 제공되지 않아 실제 모델의 네 AI 검토·Admin 통합 및 그 결과를 이용한 브라우저 승인 완료는 검증하지 않았다. 승인 트랜잭션은 격리된 회귀 테스트로 검증했으며 실제 LLM 연동 증거와 구별한다.
 - backend(Python 3.12)·frontend(Node 22/nginx) Docker 이미지 빌드 성공. 별도 PostgreSQL 16 컨테이너에 마이그레이션·seed 후 API/worker/nginx 컨테이너를 연결해 로그인·견적 수정·재계산·브라우저 대시보드 반영 및 DB의 worker 작업 완료를 확인했다. Compose 명령 전체를 그대로 실행한 검증과는 구별한다.
 - 컨테이너의 실제 외부 수집에서는 openFDA·공급업체 RSS가 성공했지만 MedWatch가 HTTP 404를 반환했다. 실패 상태가 DB에 남으며 이 상태에서는 승인 직전 최신 정보 확인 조건을 충족하지 못한다. 호스트 수집 성공이 모든 실행 환경에서의 소스 가용성을 보장하지 않는다.
-- 상황 우선 UI 변경 후 `docker compose up -d --build api worker web` 실행 성공, 백엔드 40개 테스트 통과(기존 warning 2건). 브라우저에서 IL-7 장부 6·생산 가용 2·수요 12·추가 필요량 12, 실제 발주일 미정, 잠정 후보 기본 접힘 및 펼침, 협의 전 추천 없음, OpenAI 호환 API 설정 카드 표시를 확인했다.
-- 임시 로컬 HTTP 서버로 `vllm`·`openai_compatible`의 `/v1/chat/completions` 요청, 모델 ID·strict JSON Schema 전송, 정상 응답 파싱 및 잘못된 구조화 응답 거부를 확인했다. 이는 실제 vLLM 모델 추론이나 여덟 역할 협의 완료 검증이 아니다.
+- 상황 우선 UI의 이전 확인에서는 잠정 후보 기본 접힘을 검증했으며, 현재 흐름은 기본 A/B/C를 즉시 표시하고 복수 공급·추가 분할 파생안만 접는다. 계산 기준 IL-7 장부 6·생산 가용 2·수요 12·추가 필요량 12, 실제 발주일 미정을 유지한다.
+- 임시 로컬 HTTP 서버로 `vllm`·`openai_compatible`의 `/v1/chat/completions`, 모델 ID·strict JSON Schema 전송, 정상 응답 파싱 및 잘못된 구조화 응답 거부를 확인했다. 네 AI 동시 도착 barrier를 둔 별도 HTTP 스모크에서 고정 1/2회 실행이 각각 5/9회 호출하고, Admin이 전체 4/8개 의견을 받은 후 추천을 저장함을 확인했다. 환경변수를 실행 전 5로 바꿔도 생성 시 고정한 회차가 유지됐다. 로컬 응답 fixture이며 실제 모델 추론 증거가 아니다.
+- 병렬 검토 전환 후 Compose 재빌드·기동과 TypeScript/Vite 빌드 성공. 브라우저에서 기본 A/B/C가 견적 코드 순으로 즉시 표시되고 추천 강조 없이 수량·비용·회차별 일정을 보여주는 것, 파생안 기본 접힘, 1회 설정과 다섯 역할 매핑, 새 병렬 검토 진입 화면을 확인했다. 390px 화면에서 문서 가로 폭은 390px이며 브라우저 오류 기록은 없었다.
 
 ## 계산 주의사항
 

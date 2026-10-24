@@ -4,22 +4,20 @@ import json
 import re
 from decimal import Decimal
 from sqlalchemy import select, func
+from ..config import CANONICAL_ROLES, validate_review_rounds
 from ..db import SessionLocal
 from ..models import DiscussionRun, RunArtifact, Recommendation, Scenario, uid
 from ..providers import generate_json, ProviderError
 from ..schemas import DepartmentTurn
 from .planning import validate_strategy
 
-REVIEWERS = ("inventory_logistics", "production_management", "production", "qc", "qa", "finance")
+REVIEWERS = CANONICAL_ROLES[:-1]
 ROLE_GOALS = {
-    "purchasing": "승인 원료 적기 확보, 등록 견적과 회차별 공급 확약을 비교하고 반론에 따라 후보 선택을 수정한다.",
-    "inventory_logistics": "자유 가용 재고와 장부 재고를 구분하고 유효기한, 잔량 폐기, 온도 및 보관 공간을 검토한다.",
-    "production_management": "입고일이 아닌 QC/QA 완료일과 고객 납기 역산, 생산별 원료 투입일을 검토한다.",
-    "production": "승인 공정과 작업 준비를 유지한다. 임의 감량이나 원료 대체는 허용하지 않는다.",
-    "qc": "Lot별 시험, 문서와 시험 슬롯, 분할 입고에 따른 추가 시험비와 병목을 검토한다.",
-    "qa": "업체/제품 승인, CoA와 운송 온도 및 확인된 품질 이슈를 검토한다. 발주 승인은 사용 승인이 아니다.",
+    "purchasing": "사용자의 구매 AI로서 승인 원료 적기 확보, 등록 견적과 공급 확약을 비교하고 구매 조건과 공급 불확실성을 검토한다.",
+    "inventory_planning": "재고와 생산계획을 함께 검토한다. 자유 가용 재고, 유효기한, 잔량 폐기와 보관 공간, QC/QA 완료 후 사용 가능일, 고객 납기와 생산 투입일을 확인한다. 승인 공정을 유지하며 임의 감량이나 원료 대체는 허용하지 않는다.",
+    "quality": "QC와 QA를 함께 검토한다. Lot별 시험, 문서, 시험 슬롯과 추가 시험비, 업체/제품 승인, CoA, 운송 온도와 확인된 품질 이슈를 검토한다. 발주 승인은 사용 승인이 아니다.",
     "finance": "구매/운송/시험/보관/폐기 총비용, 생산별 예산과 지급일별 현금 한도를 검토한다.",
-    "admin": "실제 부서 의견, 반론, 수정, 계산 검증을 근거로 서로 다른 적합 후보를 설명한다. 미해결 이견과 불확실성을 보존한다.",
+    "admin": "모든 회차의 네 검토 AI 의견, 이견과 계산 검증을 종합하여 최선의 적격안을 우선순위대로 추천한다. 미해결 이견과 불확실성을 보존하고 사람의 최종 승인을 요청한다.",
 }
 
 
@@ -55,7 +53,7 @@ def progress(run_id, role, state):
     with SessionLocal() as db:
         run = db.get(DiscussionRun, run_id)
         run.progress = {**run.progress, role: state}
-        artifact(db, run_id, "progress", {"role": role, "status": state})
+        artifact(db, run_id, "progress", {"role": role, "status": state, "round": run.progress.get("round"), "review_rounds": run.progress.get("review_rounds")})
         db.commit()
 
 
@@ -102,9 +100,9 @@ def check_turn(turn, role, strategy_id, version, allowed, candidates, message_id
     recommendations = turn["recommendations"]
     feasible = {k: c for k, c in candidates.items() if c["validation"].get("hard_constraints_passed") and c["validation"].get("target_delivery_met") and c["validation"].get("cash_feasible", True)}
     if role == "admin":
-        minimum = min(2, len(feasible))
+        minimum = min(1, len(feasible))
         if not minimum <= len(recommendations) <= min(3, len(feasible)):
-            errors.append(f"Provide {minimum} to {min(3, len(feasible))} distinct feasible recommendations; zero if none")
+            errors.append(f"Provide {minimum} to {min(3, len(feasible))} distinct feasible recommendations in preference order; zero if none")
         if len({r["candidate_id"] for r in recommendations}) != len(recommendations):
             errors.append("Recommendations must be distinct")
     for item in recommendations:
@@ -140,8 +138,12 @@ async def role_call(run_id, role, strategy_id, version, context, allowed, candid
         "Distinguish calculation checks, department judgments, Admin recommendations and the human's final selection/approval. "
         "Known product and record identifiers such as IL-7 or PROD-01 are permitted in prose. "
         "Put numeric quantity/cost assertions exclusively in impacts with an exact calculated metric value. "
-        "All fields are required. Non-admin recommendations must be []. Admin must provide two or three distinct feasible alternatives "
-        "if available; exactly one if one is feasible; [] if none. Budget approval may remain explicitly required; cash infeasibility is disqualifying. "
+        "All four reviewers independently assess the same registered plans in parallel, including the purchasing AI. "
+        "A later round must consider every completed opinion from all earlier rounds, not just its own department. "
+        "All fields are required. Non-admin recommendations must be []. Admin must recommend the best eligible proposal first "
+        "and may include up to two distinct alternatives; exactly one if only one is eligible; [] if none. "
+        "Do not inherit the candidate calculation rank as a recommendation order. Synthesize all review rounds and explain the chosen order. "
+        "Budget approval may remain explicitly required; cash infeasibility is disqualifying. No AI output authorizes an order; human approval remains required. "
         "Admin rationale evidence_refs/message_refs/change_refs must reference actual provided IDs. Preserve unresolved objections and unconfirmed supply risk."
     )
     messages = [{"role": "system", "content": system}, {"role": "user", "content": json.dumps({"assigned_role": role, "strategy_id": strategy_id, "version": version, **context}, ensure_ascii=False)}]
@@ -182,26 +184,34 @@ async def run_discussion(run_id):
     allowed = all_ids(data) | all_ids(calculation)
     messages, strategies = [], []
     try:
-        selected_ids = list(candidates)
-        for version in range(1, 4):
+        rounds = validate_review_rounds(calculation.get("review_rounds", 1))
+        for version in range(1, rounds + 1):
+            with SessionLocal() as db:
+                run = db.get(DiscussionRun, run_id)
+                run.progress = {"round": version, "review_rounds": rounds, **{role: "pending" for role in CANONICAL_ROLES}}
+                artifact(db, run_id, "progress", {"round": version, "review_rounds": rounds})
+                db.commit()
             strategy_id = uid()
-            context = {"snapshot": data, "calculation": calculation, "previous_messages": messages, "strategy_versions": strategies, "registered_candidates": list(candidates.values()), "current_candidate_ids": selected_ids}
-            purchase = await role_call(run_id, "purchasing", strategy_id, version, context, allowed, candidates, {m["id"] for m in messages}, {s["id"] for s in strategies})
-            selected_ids = purchase["proposal"]["candidate_ids"]
-            validated = []
-            for candidate_id in selected_ids:
-                fresh = validate_strategy(data, candidates[candidate_id], as_of=calculation.get("as_of"))
-                validated.append(fresh)
-            strategy = persist_artifact(run_id, "strategy", {"id": strategy_id, "version": version, "candidate_ids": selected_ids, "proposal": purchase["proposal"], "previous_strategy_id": strategies[-1]["id"] if strategies else None, "changes": purchase["change_requests"]})
-            # Artifact ID is canonical strategy reference used in messages and rationale.
-            strategy_id = strategy["id"]
-            purchase["strategy_id"] = strategy_id
+            # Reviews select registered plans; their frozen calculations already include validation.
+            validated = list(candidates.values())
+            strategy = persist_artifact(run_id, "strategy", {
+                "id": strategy_id, "version": version, "candidate_ids": list(candidates),
+                "proposal": {"candidate_ids": list(candidates), "summary": "등록 기본안 병렬 검토"},
+                "previous_strategy_id": strategies[-1]["id"] if strategies else None,
+                "changes": [change for message in messages if message["version"] == version - 1 for change in message["change_requests"]],
+            })
             strategies.append(strategy)
             allowed.add(strategy_id)
             persist_artifact(run_id, "validation", {"strategy_id": strategy_id, "version": version, "candidates": validated})
-            messages.append(persist_artifact(run_id, "message", purchase))
-            review_context = {**context, "strategy_id": strategy_id, "strategy": strategy, "validation": validated, "previous_messages": messages}
-            tasks = [asyncio.create_task(role_call(run_id, role, strategy_id, version, review_context, allowed, candidates, {m["id"] for m in messages}, {s["id"] for s in strategies})) for role in REVIEWERS]
+            # Do not mutate this shared context until every reviewer has finished the pass.
+            context = {
+                "snapshot": data, "calculation": calculation, "round": version, "review_rounds": rounds,
+                "previous_messages": list(messages), "strategy_versions": list(strategies),
+                "registered_candidates": list(candidates.values()), "current_candidate_ids": list(candidates),
+                "strategy": strategy, "validation": validated,
+            }
+            message_ids, change_ids = {m["id"] for m in messages}, {s["id"] for s in strategies}
+            tasks = [asyncio.create_task(role_call(run_id, role, strategy_id, version, context, allowed, candidates, message_ids, change_ids)) for role in REVIEWERS]
             outcomes = await asyncio.gather(*tasks, return_exceptions=True)
             failures = []
             for outcome in outcomes:
@@ -211,20 +221,17 @@ async def run_discussion(run_id):
                     messages.append(persist_artifact(run_id, "message", outcome))
             if failures:
                 raise failures[0]
-            objections = any(m["position"] != "accept" for m in messages[-6:])
-            if not objections or version == 3:
-                break
         admin_context = {"snapshot": data, "calculation": calculation, "messages": messages, "strategy_versions": strategies, "registered_candidates": list(candidates.values()), "exclusion_reasons": [{"candidate_id": c["id"], "validation": c["validation"]} for c in candidates.values()]}
         admin = await role_call(run_id, "admin", strategies[-1]["id"], strategies[-1]["version"], admin_context, allowed, candidates, {m["id"] for m in messages}, {s["id"] for s in strategies})
         admin_message = persist_artifact(run_id, "message", admin)
         with SessionLocal() as db:
             run = db.get(DiscussionRun, run_id)
-            for item in sorted(admin["recommendations"], key=lambda r: candidates[r["candidate_id"]].get("rank", 999)):
+            for rank, item in enumerate(admin["recommendations"], 1):
                 candidate = validate_strategy(data, candidates[item["candidate_id"]], as_of=calculation.get("as_of"))
                 validation = candidate["validation"]
                 if not validation.get("hard_constraints_passed") or not validation.get("target_delivery_met") or not validation.get("cash_feasible", True):
                     raise ProviderError("invalid_output", "Recommendation failed final deterministic validation", "admin")
-                rec = Recommendation(run_id=run_id, scenario_id=run.scenario_id, snapshot_revision=run.snapshot_revision, candidate_id=item["candidate_id"], data={"candidate": candidate, "rank": candidates[item["candidate_id"]].get("rank"), "rationale_items": [{"claim": item["claim"], "evidence_refs": item["evidence_refs"], "message_refs": item["message_refs"] + [admin_message["id"]], "change_refs": item["change_refs"]}], "remaining_risks": item["remaining_risks"], "unresolved_objections": [m for m in messages if m["position"] != "accept"]})
+                rec = Recommendation(run_id=run_id, scenario_id=run.scenario_id, snapshot_revision=run.snapshot_revision, candidate_id=item["candidate_id"], data={"candidate": candidate, "rank": rank, "rationale_items": [{"claim": item["claim"], "evidence_refs": item["evidence_refs"], "message_refs": item["message_refs"] + [admin_message["id"]], "change_refs": item["change_refs"]}], "remaining_risks": item["remaining_risks"], "unresolved_objections": [m for m in messages if m["position"] != "accept"]})
                 db.add(rec)
             current = db.get(Scenario, run.scenario_id)
             run.status = "stale" if current.revision != run.snapshot_revision else "awaiting_review"

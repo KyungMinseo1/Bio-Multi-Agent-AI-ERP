@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { CheckCircle2, Edit3, KeyRound, Link2, Plus, RefreshCw, Save, ShieldCheck } from 'lucide-react';
-import { api, display, label, record, rows, send, text, time, type Row } from '../api';
+import { api, discussionRoles, display, label, record, rows, send, text, time, type Row } from '../api';
 import { Badge, Empty, ErrorBox, Loading, Modal, PageHeading, Panel, ReadOnlyNotice, RecordDetails, Success, useWorkspace } from '../components';
 function SourceForm({ source, close, saved }: { source: Row; close: () => void; saved: () => void }) {
   const { scenario } = useWorkspace(); const [values, setValues] = useState<Row>({ kind: 'rss', enabled: true, ownership_verified: false, poll_interval_minutes: 720, ...source }); const [busy, setBusy] = useState(false); const [error, setError] = useState<unknown>();
@@ -57,10 +57,12 @@ export default function Settings({ settings }: { settings: Row }) {
         </article>;
       })}</div>
       <div className="panel-footnote">설정됨은 자격증명·모델 구성 여부이며 연결 성공을 보장하지 않습니다. 실제 호출 결과는 협의 실행에 기록됩니다.</div>
+      <div className="setting-item"><span>4개 검토 AI 병렬 라운드</span><strong>{text(llm.review_rounds ?? 1)}회 · 완료 후 Admin 통합</strong></div>
+      <p className="projection-note">구매·재고 및 생산계획·품질·재무가 매 라운드 동시에 검토합니다. 2회 이상이면 다음 라운드는 직전 전체 의견을 참고하며, 설정한 모든 라운드를 마친 후 Admin이 전체 맥락을 통합합니다. 실행 도중 설정을 바꿔도 이미 시작한 협의의 라운드 수는 바뀌지 않습니다.</p>
       <details className="settings-environment">
         <summary>서버 환경변수 설정 안내</summary>
         <div className="environment-grid">
-          <div><strong>공통</strong><code>LLM_PROVIDER</code><code>LLM_TIMEOUT_SECONDS</code></div>
+          <div><strong>공통</strong><code>LLM_PROVIDER</code><code>LLM_TIMEOUT_SECONDS</code><code>LLM_REVIEW_ROUNDS=1</code><small>기본 1회 · 2로 설정하면 4개 AI 병렬 검토를 두 번 실행</small></div>
           <div><strong>OpenAI Responses</strong><code>OPENAI_API_KEY</code><code>OPENAI_MODEL</code><code>OPENAI_BASE_URL (선택)</code></div>
           <div><strong>Gemini</strong><code>GEMINI_API_KEY</code><code>GEMINI_MODEL</code></div>
           <div><strong>OpenRouter</strong><code>OPENROUTER_API_KEY</code><code>OPENROUTER_MODEL</code></div>
@@ -69,7 +71,7 @@ export default function Settings({ settings }: { settings: Row }) {
         </div>
         <p>vLLM·호환 API는 접근 가능한 /v1 기본 URL과 서버에서 제공하는 정확한 모델 ID가 모두 필요합니다. URL만으로는 연결할 수 없으며 strict JSON Schema 구조화 출력을 지원해야 합니다. vLLM은 별도 서버에서 실행하고 GPU 병렬화는 서버의 <code>vllm serve … --tensor-parallel-size …</code>로 설정합니다.</p>
       </details>
-      {Object.keys(roles).length > 0 && <div className="role-models"><h3>역할별 모델 매핑</h3>{Object.entries(roles).map(([role, config]) => <div key={role}><strong>{label(role)}</strong><code>{typeof config === 'string' ? config : `${text(record(config).provider)} / ${text(record(config).model)}`}</code></div>)}</div>}
+      {Object.keys(roles).length > 0 && <div className="role-models"><h3>4개 검토 AI + Admin 모델 매핑</h3>{discussionRoles.map(role => <div key={role}><strong>{label(role)}</strong><code>{typeof roles[role] === 'string' ? text(roles[role]) : `${text(record(roles[role]).provider)} / ${text(record(roles[role]).model)}`}</code></div>)}</div>}
     </Panel>
     <Panel title="공식 외부 수집 소스" subtitle="승인 담당자가 공식 도메인과 소유 관계를 확인한 후 등록합니다." action={<button className="button primary small" disabled={!allowed} onClick={() => setEditing({})}><Plus size={15}/>소스 추가</button>}>
       <div className="table-scroll"><table>

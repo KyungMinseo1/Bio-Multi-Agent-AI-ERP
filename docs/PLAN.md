@@ -42,7 +42,7 @@ backend/app/services/planning.py의 evaluate_material(material_id: UUID, as_of: 
 
 수정 API의 트랜잭션에 재계산 Job을 함께 넣는다. worker는 DB의 FOR UPDATE SKIP LOCKED로 작업을 점유하고 원료별 중복 작업을 합친다. 재시작 시 만료된 작업 lease를 회수한다. 주기적 재평가와 외부 수집도 동일 worker에서 실행한다. GET /alerts, POST /planning/recalculate, POST /alerts/{id}/acknowledge를 제공한다.
 
-### 4. 실제 8역할 토론과 공급자 교체 가능한 호출 경계
+### 4. 네 AI 병렬 검토와 Admin 통합 선정, 공급자 호출 경계
 backend/app/providers에 공통 async generate_json(role: str, messages: list[Message], schema: dict) -> dict 인터페이스와 OpenAI/Gemini/OpenRouter/vLLM 어댑터를 둔다. openai와 google-genai SDK를 직접 사용하며 별도 에이전트 프레임워크는 도입하지 않는다. provider/model/base_url/timeout은 서버 설정과 역할별 매핑으로 선택하고 API 키는 환경변수만 읽는다. /settings에는 키 값이 아닌 설정 여부와 모델/역할 매핑만 표시한다. 연결 확인은 실제 짧은 구조화 호출로 수행한다. 구성되지 않은 공급자는 명시적인 configuration_error이며 mock으로 대체하지 않는다.
 
 공급자별 계약은 다음으로 고정한다. 모든 모델 ID는 환경변수로 명시하며 임의 기본 모델/자동 공급자 전환은 없다. 공통 LLM_TIMEOUT_SECONDS=60, OpenAI 계열 SDK max_retries=0. Pydantic extra=forbid, object 루트, 모든 속성 required(선택값은 nullable), 중첩 additionalProperties=false인 공통 스키마를 사용한다.
@@ -56,15 +56,15 @@ backend/app/providers에 공통 async generate_json(role: str, messages: list[Me
 
 POST /discussions는 alert_id와 ERP snapshot revision으로 202와 run_id를 반환한다. GET /discussions/{id}와 /events는 영속 메시지와 Last-Event-ID로 재접속 가능한 SSE를 제공한다. 상태는 queued/running/awaiting_review/completed/failed/stale. 실행 중 ERP 입력이 바뀌어도 토론은 기존 snapshot으로 끝내고 stale을 표시한다.
 
-구매가 계산 후보를 받아 StrategyVersion v1을 제안하고, 재고·물류/생산관리/생산/QC/QA/재무 6역할이 같은 v1을 병렬 검토한다. 구매 수정 → 같은 6역할 재검토를 최대 2회 수행한다. 모든 메시지는 strategy_id/version/role/proposal/impacts/reasons/evidence_refs/change_requests/position(accept, object, needs_information) 구조로 Pydantic 검증한다. 근거는 스냅샷의 레코드 ID·계산 결과 ID·외부 근거 ID만 허용하고 없는 ID는 거부한다. 단순 찬반이 아니라 PDF의 7개 부서 목표별 지연·품질·폐기·공간·비용·지급 문제를 표시한다.
+구매(`purchasing`)·재고/생산계획(`inventory_planning`)·품질(`quality`)·재무(`finance`) 네 AI가 같은 스냅샷과 등록 후보를 처음부터 동시에 검토한다. 구매 AI는 발주 담당자의 AI이며 별도 선행 단계가 아니다. `LLM_REVIEW_ROUNDS` 기본 1회, 2이면 네 AI 병렬 검토를 정확히 2회 실행한다. 다음 회차에는 이전 회차 전체 의견을 공유한다. 실행 생성 시 회차 수를 계산 스냅샷에 고정하고, 모든 회차가 끝난 뒤 Admin이 전체 context를 통합한다. 모든 메시지는 strategy_id/version/role/proposal/impacts/reasons/evidence_refs/change_requests/position(accept, object, needs_information) 구조로 검증한다. 없는 근거 ID는 거부하며 통합 역할에서도 일정·품질·폐기·공간·비용·지급 검토를 생략하지 않는다.
 
 LLM은 공급업체/가격/기한/승인 상태를 만들어낼 수 없으며 제안은 등록된 offer_id와 허용 수량/입고 일정으로만 구성한다. 수정안도 planning.validate_strategy로 재검증한다. JSON 오류 시 오류 목록을 포함해 동일 역할에 한 번만 수정 요청하고 다시 실패하면 run=failed, 해당 역할·원인을 UI에 노출한다. 호출 시간초과/통신/인증 오류도 숨기거나 성공으로 대체하지 않는다.
 
-Admin은 전체 메시지와 계산 검증 결과를 읽고 근거가 있는 서로 다른 2~3개 후보의 설명과 우선순위를 제출한다. 서버가 hard constraint와 순위를 재검증한 후보만 Recommendation으로 확정한다. 1개만 적합하면 1개와 제외 사유, 0개면 발주 불가·추가 확인사항을 표시한다. 무조건 합의로 위장하지 않고 잔여 반대/미확인 사항/추가 비용/납기 근거를 보존한다. UI는 역할별 진행 상태, 버전 차이, 토론 근거, 추천안 비교를 보여준다.
+Admin은 전체 회차의 의견과 계산 검증 결과를 읽고 최적 제안을 선정해 근거와 우선순위를 제출한다. 서버는 필수조건·납기·현금 제약을 재검증하되 계산기의 기존 순위로 Admin 순서를 덮어쓰지 않는다. 적합한 안이 없으면 발주 불가·추가 확인사항을 표시하며, 잔여 반대·미확인 사항·추가 비용·납기 근거를 보존한다. UI는 네 AI와 Admin의 진행 상태, 회차별 검토 근거와 최종 추천을 보여준다.
 
 추천 근거는 실제 토론 기록을 따라 역추적할 수 있도록 Recommendation에 rationale_items를 저장한다. 각 항목은 claim(사용자용 판단 요약), evidence_refs(ERP snapshot/계산 결과/외부 근거 ID 목록), message_refs(실제 AgentMessage ID 목록), change_refs(해당 StrategyVersion 변경 ID 목록)를 가진다. 원본이 없는 참조와 계산 결과에 반하는 수치 주장은 검증 오류로 처리한다. Admin은 실제 부서 의견·반론·수정·검증을 요약하며 내부 사고과정 공개를 요구하지 않는다. 부서 동의 자체를 사실 증명으로 취급하지 않고, 해결되지 않은 이견과 미확인 조건도 추천안에 남긴다.
 
-UI는 의사결정 요약을 기본으로 하고 상세를 단계적으로 공개한다. /dashboard 첫 영역은 '지금 해야 할 일'로 구성하여 발주 검토 필요 원료·검토 마감일·영향 생산/납품·다음 행동 버튼을 보여준다. /discussions/:id 첫 영역에는 추천안별 추천 이유·목표 납기 충족 여부와 근거 수준·총비용과 추가 비용·필수조건 검증·잔여 위험·승인 필요사항을 동일 항목으로 비교한다. 이어 '협의 요약'에 부서별 핵심 의견·수정 전후·해결되지 않은 이견을 표시한다. '근거 보기'를 누르면 해당 주장에 연결된 ERP 스냅샷/계산 내역/외부 출처/부서 메시지를 열고, 전체 토론 로그는 별도 펼침 영역에 둔다. 사용자가 발주 판단을 위해 전체 대화를 읽도록 강제하지 않는다. 상태는 색상뿐 아니라 텍스트로 구별하며 ERP 입력·수정 화면은 요약에서 바로 이동할 수 있게 유지한다.
+UI는 상황 → 기본 발주안 → 네 AI 병렬 검토 → Admin 통합 결과 → 담당자 선택·승인 순서다. /dashboard에서 부족량·만료 위험·미정인 실제 발주일을 설명하고 A/B/C 기본 발주안을 바로 보여준다. 검토 전에는 추천·순위·적합성 레이블 없이 수량·비용·일정·예상 폐기 등 자료만 비교한다. 추가 조합안은 별도 펼침으로 제공한다. /discussions/:id에서 실제 검토 후 추천 이유·납기 근거·총비용·제약 검증·잔여 위험·승인 필요사항을 비교한다. 각 AI 핵심 의견과 회차별 이견을 요약하고 원본 근거와 전체 기록은 상세 펼침으로 제공한다. 색상뿐 아니라 텍스트로 상태를 구별하고 ERP 수정 경로를 유지한다.
 
 ### 5. 공식 외부 이슈 자동 수집과 수동 확인을 연결
 backend/app/services/external_sources.py에 openFDA JSON과 public RSS/Atom의 두 수집기를 구현한다. ExternalIssue는 source_kind, source_url, publisher, published_at, occurred_at(nullable), fetched_at, source_status, verification_status(unverified/relevance_unconfirmed/supply_impact_confirmed/quality_impact_confirmed/cleared), severity, source_reliability, summary를 분리한다. 영향 지연일/업체/원료/Lot/발주 링크와 확인자·사유를 IssueLink에 기록한다. 공개 소스가 공급 차질을 완전히 포착한다고 주장하지 않는다.
@@ -100,7 +100,7 @@ POST /recommendations/{id}/approve는 expected_revision과 Idempotency-Key를 �
 
 - 계산: 기존 입고 없음, 재고 40, 일 사용 1, 조달 30일, 안전재고 5, 검토 0일 → 40에서는 발주 임계 알림 없음, 35에서 warning. 34에서 뒤늦은 경고이며 이미 수요 부족이 있는 입력은 urgent. 동일 원료의 QC 대기/QA 미승인/만료/타 생산 예약 Lot는 확정 가용량에 포함하지 않는다. 입고일보다 QC/QA 완료가 늦은 기존 PO가 중간 부족을 가리지 않아야 한다.
 - 충돌: 가장 싼 미승인 업체는 제외, 확약 없는 저가안은 납기 근거 충분안보다 아래, 냉장공간 초과/미허용 분할입고/유효기간 전 미소진/지급 한도 초과를 각각 구별해 표시한다. 배정된 Lot는 해당 생산 수요에 한 번만 사용한다.
-- 실제 브라우저: 초기 로그인 → ERP 폼으로 견적/투입 수요 변경 → dashboard 선제 알림 변경 → 토론 실행 → 7부서와 Admin 실제 메시지/SSE → 2~3개 적합안 비교 → 사용자 선택 → 내부 PO 목록과 DB 영속 상태 확인. 1개/0개 적합안도 별도로 확인한다. 새로고침/worker 재시작 후 이력과 결과가 남아야 한다.
+- 실제 브라우저: 로그인 → ERP 견적·수요 변경 → 부족·만료 위험과 기본 발주안 반영 → 네 AI 병렬 검토/SSE → Admin 통합 결과 → 담당자 선택·승인 → 내부 PO 영속 상태 확인. 1/2회 설정, 실패 역할이 있으면 Admin 미실행, 적합안 1개/0개도 확인한다. 실제 LLM 미설정 시 해당 검증 한계를 명시한다.
 - 설명 가능성과 사용성: 브라우저에서 재고·물류의 공간 초과 반론으로 입고안이 수정되는 가상 시나리오를 실행한다. 추천 요약 → 해당 부서 의견 → 수정 전후 → 공간 계산과 원본 용량 레코드가 실제 ID로 연결되는지 확인한다. 원본 ERP를 수정한 후에도 과거 추천 근거는 당시 snapshot을 보여야 한다. 전체 토론을 펼치지 않고 대시보드에서 검토 대상 확인 → 대안 비교 → 위험/추가 비용 확인 → 승인까지 완료할 수 있어야 한다. 근거 없는 주장·존재하지 않는 메시지 참조는 추천 확정 전에 거부한다.
 - LLM 4종: OPENAI_API_KEY/OPENAI_MODEL, GEMINI_API_KEY/GEMINI_MODEL, OPENROUTER_API_KEY/OPENROUTER_MODEL, VLLM_BASE_URL/VLLM_MODEL 및 필요 시 VLLM_API_KEY를 구성하고 각 공급자로 같은 구조화 역할 호출을 실제 실행한다. 전체 토론은 가용한 한 공급자로 완료하고 역할별 다른 공급자 매핑도 실제 호출로 증명한다. 자격증명/실제 vLLM 서버가 없는 공급자는 검증 불가로 명시하며 mock 통과를 실제 연동 증거로 보고하지 않는다. 잘못된 키/부정확 JSON/타임아웃에서 실패가 사용자에게 보여야 한다.
 - 자동 수집: 공식 소스에서 실제 레코드를 동기화해 원문 링크/시각/원본 식별자가 DB와 /issues에 나타남을 확인한다. 동일 수집 재실행은 중복 사건을 만들지 않는다. 가상 업체와 자동 연결하지 않음, 원료명 유사 사건은 relevance_unconfirmed, 확인된 품질 링크는 후보 보류, 공급 지연 확인은 재계산, 해제는 새 이력과 재검토로 확인한다. 테스트에서는 격리된 HTTP fixture로 정정/429/실패 동작을 검증하고 실제 수집 smoke와 구분한다.

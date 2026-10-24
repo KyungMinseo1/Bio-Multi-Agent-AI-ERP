@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowRight, ArrowUpRight, Boxes, CalendarClock, CheckCircle2, Clock3, FlaskConical, MessagesSquare, RefreshCw, ShieldCheck, Sparkles, TriangleAlert } from 'lucide-react';
-import { api, date, number, quantity, record, rows, send, text, type Row } from '../api';
+import { api, date, discussionRoles, label, number, quantity, record, rows, send, text, type Row } from '../api';
 import { Badge, Empty, ErrorBox, Evidence, InlineLink, Modal, PageHeading, Panel, ReadOnlyNotice, Timeline, useWorkspace } from '../components';
 import CandidateComparison from '../CandidateComparison';
 function AlertAcknowledgement({ alert, close, saved }: { alert: Row; close: () => void; saved: () => void }) {
@@ -17,18 +17,25 @@ export default function Dashboard() {
   const { scenarioId, scenario, planning, user, refresh } = useWorkspace(); const navigate = useNavigate();
   const [busy, setBusy] = useState(false); const [error, setError] = useState<unknown>(); const [material, setMaterial] = useState('');
   const [acknowledging, setAcknowledging] = useState<Row | null>(null);
-  const [showAllCandidates, setShowAllCandidates] = useState(false);
   const alertsQuery = useQuery({ queryKey: ['alerts', scenarioId], queryFn: () => api(`/scenarios/${scenarioId}/alerts`) });
   const materials = rows(planning.materials); const alerts = rows(alertsQuery.isSuccess ? alertsQuery.data : planning.alerts).filter(alert => alert.status !== 'resolved');
   const selected = material || text(alerts[0]?.material_id || materials[0]?.material_id); const current = materials.find(row => row.material_id === selected);
-  const candidates = rows(planning.candidates).filter(row => row.material_id === selected).sort((a, b) => number(a.rank) - number(b.rank));
+  const candidates = rows(planning.candidates).filter(row => row.material_id === selected);
+  const offers = rows(scenario.offers).filter(offer => offer.material_id === selected && offer.active !== false && offer.inactive !== true)
+    .sort((a, b) => text(a.code || a.id).localeCompare(text(b.code || b.id)));
+  const basicPlans: Row[] = offers.flatMap((offer, index) => {
+    const variants = candidates.filter(candidate => candidate.offer_id === offer.id)
+      .sort((a, b) => rows(a.deliveries).length - rows(b.deliveries).length || text(a.id).localeCompare(text(b.id)));
+    return variants.length ? [{ ...variants[0], plan_label: index < 26 ? String.fromCharCode(65 + index) : `안 ${index + 1}` }] : [];
+  });
+  const extraPlans = candidates.filter(candidate => !basicPlans.some(plan => plan.id === candidate.id));
   const urgent = alerts.filter(alert => alert.status === 'urgent'); const plans = rows(scenario.production_plans);
   const start = async () => { setBusy(true); setError(undefined); try { const run = record(await send(`/scenarios/${scenarioId}/discussions`, { expected_revision: scenario.revision })); navigate(`/discussions/${text(run.id || run.run_id)}`); } catch (err) { setError(err); } finally { setBusy(false); } };
   return <>
     <PageHeading eyebrow="PROCUREMENT SITUATION" title="원료 상황부터, 함께 판단하기" description="재고·생산 수요를 확인하고, 실제 AI 협의를 거쳐 발주 여부와 시점을 결정하세요." action={<button className="button secondary" disabled={busy} onClick={async () => { setBusy(true); try { await send(`/scenarios/${scenarioId}/evaluate`, {}); await refresh(); } catch (err) { setError(err); } finally { setBusy(false); } }}><RefreshCw size={16} className={busy ? 'spin' : ''}/>재계산</button>}/>
     <ReadOnlyNotice/>
     <ErrorBox error={error || alertsQuery.error} retry={() => { refresh(); setError(undefined); }}/>
-    <div className="decision-steps" aria-label="원료 의사결정 순서"><strong>1. 상황 파악</strong><ArrowRight size={15}/><span>2. 부서별 AI 협의</span><ArrowRight size={15}/><span>3. 추천·이견 확인</span><ArrowRight size={15}/><span>4. 담당자 선택·승인</span></div>
+    <div className="decision-steps" aria-label="원료 의사결정 순서"><strong>1. 부족·유효기간 확인</strong><ArrowRight size={15}/><span>2. 기본안 A/B/C</span><ArrowRight size={15}/><span>3. 4개 AI 병렬 검토</span><ArrowRight size={15}/><span>4. Admin 통합</span><ArrowRight size={15}/><span>5. 담당자 승인</span></div>
     <Panel title="먼저, 어떤 상황인가요?" subtitle={`계산 기준일 ${date(planning.as_of)} · 현재 데이터가 유지될 때의 수요와 재고입니다.`} action={<select aria-label="상황을 확인할 원료" value={selected} onChange={event => setMaterial(event.target.value)}>{materials.map(item => <option key={text(item.material_id)} value={text(item.material_id)}>{text(item.name)}</option>)}</select>}>
       {current ? <div className="situation-summary" id="material-situation">
         <h3>{text(current.name)} · {text(current.code)}</h3>
@@ -39,6 +46,11 @@ export default function Dashboard() {
         <Evidence refs={current.evidence_refs}/>
       </div> : <Empty title="등록된 원료 상황이 없습니다">생산 수요와 원료·재고 데이터를 등록하세요.</Empty>}
     </Panel>
+    <section id="comparison" className="comparison-section">
+      <div className="section-heading"><div><span className="eyebrow">BASIC PROCUREMENT PLANS</span><h2>기본 발주안 · A/B/C</h2><p>{text(current?.name) || '선택 원료'}의 견적별 기본 수량·비용·일정입니다. A/B/C는 등록 견적의 구분 기호이며 순위나 추천이 아닙니다. 계약에 등록된 분할 입고 일정은 그대로 반영합니다.</p></div></div>
+      <CandidateComparison candidates={basicPlans} compact/>
+      {extraPlans.length > 0 && <details className="provisional-candidates" key={selected}><summary>복수 공급·추가 분할 등 파생 계산 {extraPlans.length}개 보기</summary><CandidateComparison candidates={extraPlans} compact/></details>}
+    </section>
     <div className="metric-grid">
       <article className="metric-card"><div><span>검토 신호</span><span className="metric-icon amber"><CalendarClock size={19}/></span></div><strong>{alerts.length}<small>개 원료 알림</small></strong><p><span className="amber-text">{urgent.length}건 긴급 검토</span> · 발주 결정 아님</p></article>
       <article className="metric-card"><div><span>관리 중인 원료</span><span className="metric-icon teal"><FlaskConical size={19}/></span></div><strong>{materials.length}<small>개 품목</small></strong><p>품질 상태 · 투입일 · 유효일 기준 계산</p></article>
@@ -52,7 +64,7 @@ export default function Dashboard() {
           <div className={`alert-symbol ${text(alert.status)}`}><TriangleAlert size={23}/></div>
           <div className="alert-main">
             <div className="alert-title"><h3>{text(item?.name) || '원료 확인 필요'}</h3><Badge value={alert.status}/><span className="subtle-code">{text(item?.code)}</span></div>
-            <p>{text(alert.message)} · 발주 적합성은 부서별 협의에서 검토합니다.</p>
+            <p>{text(alert.message)} · 발주 적합성은 AI 병렬 검토 후 Admin이 통합 평가합니다.</p>
             <div className="alert-meta"><span><Clock3 size={13}/>역산 검토 기한 추정 {alert.latest_order_date || item?.latest_order_date ? date(alert.latest_order_date || item?.latest_order_date) : '산정 근거 부족'}</span><span>첫 부족 예상 {date(alert.first_shortage_date || item?.first_shortage_date)}</span><span>연결된 투입 수요 {affected.length}건</span></div>
             <details className="alert-calculation"><summary>감지 근거 · 조달기간 · 영향 생산 보기</summary><div className="alert-calculation-content">
               <p>현재 계획의 생산 가용량 {quantity(item?.free_available_quantity)} {text(item?.base_unit)}</p>
@@ -79,21 +91,12 @@ export default function Dashboard() {
       <section className="discussion-invite">
         <div className="invite-decoration"><MessagesSquare size={110}/></div><span className="eyebrow">NEXT · REAL AI DISCUSSION</span><div className="invite-icon"><Sparkles size={25}/></div>
         <h2>발주가 필요한지,<br/>언제·어떻게 할지 함께 검토해요.</h2>
-        <p>계산만으로 적합한 안을 확정하지 않습니다. 실제 AI가 부서별 근거와 이견을 검토한 뒤 추천하며, 최종 선택과 승인은 담당자가 합니다.</p>
-        <div className="role-chips">{['구매', '재고·물류', '생산관리', '생산', 'QC', 'QA', '재무', 'Admin'].map(role => <span key={role}>{role}</span>)}</div>
-        <button className="button white" onClick={start} disabled={busy || !user.id}>{busy ? '협의 요청 중…' : '현재 상황으로 AI 협의 시작'}<ArrowUpRight size={17}/></button>
+        <p>네 AI가 구매·재고/생산계획·품질·재무 관점에서 동시에 검토하고 Admin이 전체 의견을 통합합니다. 최종 선택과 승인은 담당자가 합니다.</p>
+        <div className="role-chips">{discussionRoles.map(role => <span key={role}>{label(role)}</span>)}</div>
+        <button className="button white" onClick={start} disabled={busy || !user.id}>{busy ? '검토 요청 중…' : '현재 상황으로 AI 병렬 검토 시작'}<ArrowUpRight size={17}/></button>
         <small>현재 시나리오 전체를 검토합니다. 실제 LLM을 호출하며 미설정·호출 실패 시 오류를 표시하고 추천을 꾸미지 않습니다.</small>
       </section>
     </div>
-    <section id="comparison" className="comparison-section">
-      <div className="section-heading"><div><span className="eyebrow">OPTIONAL · PROVISIONAL CALCULATIONS</span><h2>참고용 잠정 계산</h2><p>협의에 쓰일 수치 자료입니다. 계산 순서는 AI 추천 순위나 발주 적합성 판단이 아닙니다.</p></div></div>
-      <details className="provisional-candidates" key={selected}>
-        <summary>{text(current?.name) || '선택 원료'} · 협의 전 계산 후보 펼치기 ({candidates.length}개)</summary>
-        <div className="notice"><ShieldCheck size={17}/>등록 조건의 수치 검증과 여러 부서가 판단하는 적합성은 다릅니다. 실제 협의 결과에서 추천·남은 이견을 확인한 뒤 담당자가 결정합니다.</div>
-        <CandidateComparison candidates={showAllCandidates ? candidates : candidates.slice(0, 3)} compact/>
-        {candidates.length > 3 && <div className="show-all-candidates"><button className="button secondary small" onClick={() => setShowAllCandidates(!showAllCandidates)}>{showAllCandidates ? '앞의 세 계산만 보기' : `전체 ${candidates.length}개 잠정 계산 보기`}</button></div>}
-      </details>
-    </section>
     <Panel title="추가 조달 전 날짜별 재고 투영" subtitle="원본 계획 기준 · 미래 입고·QC/QA 완료는 예측이며 실제 사용 승인이 아닙니다." action={<InlineLink to="/erp/production">생산계획 수정</InlineLink>}>{rows(record(planning.timelines)[selected]).length ? <Timeline items={record(planning.timelines)[selected]}/> : <Empty title="선택 원료의 날짜별 내역이 없습니다">원료 수요와 기존 입고 일정을 등록해 주세요.</Empty>}</Panel>
   </>;
 }

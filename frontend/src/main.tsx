@@ -13,7 +13,7 @@ import Settings from './pages/Settings';
 import './styles.css';
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false, staleTime: 5000 } } });
 const navigation = [
-  { group: '의사결정', items: [{ to: '/dashboard', name: '대시보드', icon: LayoutDashboard }, { to: '/discussions', name: '부서별 AI 협의', icon: MessagesSquare }, { to: '/issues', name: '외부 이슈 모니터', icon: Radar }] },
+  { group: '의사결정', items: [{ to: '/dashboard', name: '대시보드', icon: LayoutDashboard }, { to: '/discussions', name: 'AI 병렬 검토', icon: MessagesSquare }, { to: '/issues', name: '외부 이슈 모니터', icon: Radar }] },
   { group: 'ERP 데이터', items: [{ to: '/erp/materials', name: '원료 마스터', icon: FlaskConical }, { to: '/erp/inventory', name: '재고 · 품질', icon: Boxes }, { to: '/erp/production', name: '생산 · 수요 계획', icon: ClipboardList }, { to: '/erp/suppliers', name: '공급업체', icon: Users }, { to: '/erp/offers', name: '공급 견적', icon: Truck }, { to: '/erp/purchase-orders', name: '내부 발주', icon: PackageCheck }] },
 ];
 function Login({ settings, onReadOnly, onLogin }: { settings: Row; onReadOnly: () => void; onLogin: () => void }) {

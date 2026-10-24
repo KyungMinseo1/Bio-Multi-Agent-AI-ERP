@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from . import models
 from .auth import COOKIE, approver, bootstrap_accounts, current_user, mutation_user, public_user, token_hash, verify_password
-from .config import COLLECTIONS, setting, planning_date
+from .config import COLLECTIONS, setting, planning_date, review_rounds
 from .db import get_db, SessionLocal, assert_migrated
 from .models import User, Session, Scenario, ERPRecord, Job, DiscussionRun, RunArtifact, Recommendation, ExternalSource, ExternalIssue, IssueEvidence, CollectionRun, AuditEvent, Alert, uid, now
 from .schemas import Login, DiscussionInput, ApprovalInput, DepartmentTurn
@@ -157,7 +157,8 @@ def run_view(db, run, full=True):
     result = {"id": run.id, "scenario_id": run.scenario_id, "status": run.status, "snapshot_revision": run.snapshot_revision, "created_at": utc_iso(run.created_at), "error": run.error, "progress": run.progress}
     if full:
         artifacts = db.scalars(select(RunArtifact).where(RunArtifact.run_id == run.id).order_by(RunArtifact.sequence)).all()
-        result.update(messages=[{**a.data, "id": a.id} for a in artifacts if a.kind == "message"], strategies=[{**a.data, "id": a.id} for a in artifacts if a.kind == "strategy"], validations=[{**a.data, "id": a.id} for a in artifacts if a.kind == "validation"], events=[{"id": a.id, "sequence": a.sequence, "type": a.kind, "data": a.data} for a in artifacts], recommendations=[{**r.data, "id": r.id, "candidate_id": r.candidate_id, "status": r.status, "revision": 1, "snapshot_revision": r.snapshot_revision} for r in db.scalars(select(Recommendation).where(Recommendation.run_id == run.id))], snapshot=run.snapshot, calculation=run.calculation)
+        recommendations = sorted(db.scalars(select(Recommendation).where(Recommendation.run_id == run.id)), key=lambda row: row.data.get("rank") or 999)
+        result.update(messages=[{**a.data, "id": a.id} for a in artifacts if a.kind == "message"], strategies=[{**a.data, "id": a.id} for a in artifacts if a.kind == "strategy"], validations=[{**a.data, "id": a.id} for a in artifacts if a.kind == "validation"], events=[{"id": a.id, "sequence": a.sequence, "type": a.kind, "data": a.data} for a in artifacts], recommendations=[{**r.data, "id": r.id, "candidate_id": r.candidate_id, "status": r.status, "revision": 1, "snapshot_revision": r.snapshot_revision} for r in recommendations], snapshot=run.snapshot, calculation=run.calculation)
     return result
 
 
@@ -178,6 +179,7 @@ def create_discussion(scenario_id: str, body: DiscussionInput, user=Depends(muta
     if state["revision"] != body.expected_revision:
         raise HTTPException(409, detail={"code": "stale", "message": "ERP revision changed", "current_revision": state["revision"]})
     calculation = evaluate(state, as_of=planning_date())
+    calculation["review_rounds"] = review_rounds()
     if body.alert_id:
         alert = db.get(Alert, body.alert_id)
         if not alert or alert.scenario_id != scenario_id:
