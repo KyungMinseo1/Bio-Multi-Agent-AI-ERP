@@ -27,6 +27,9 @@ async def approve(db, recommendation_id, body, key, user):
         raise HTTPException(404, "Recommendation not found")
     if rec.scenario_id == "main-workspace":
         raise HTTPException(409, "통합 업무의 추천을 주 업무 화면으로 가져와 2차 발주 승인을 진행하세요.")
+    analysis_run=db.get(DiscussionRun,rec.run_id)
+    if analysis_run.actor_id not in (None,user.id):
+        raise HTTPException(404,"Recommendation not found")
     scenario = db.get(Scenario, rec.scenario_id)
     if body.expected_revision != rec.snapshot_revision or scenario.revision != rec.snapshot_revision:
         stale(db, rec)
@@ -132,7 +135,10 @@ async def approve(db, recommendation_id, body, key, user):
         order = {"id": po_id, "code": f"PO-{now():%Y%m%d}-{po_id[:8].upper()}", "name": "내부 승인 발주", "revision": 1, "material_id": material_id, "status": "approved", "internal_only": True, "recommendation_id": rec.id, "run_id": rec.run_id, "snapshot_revision": rec.snapshot_revision, "lines": lines, "deliveries": fresh["deliveries"], "quantity": fresh["quantity"], "total_cost": str(total), "costs": fresh["costs"], "confirmed": validation.get("supply_evidence_level") == "confirmed", "approved_by": user.email, "approved_at": now().isoformat(), "rationale_items": rec.data["rationale_items"], "remaining_risks": rec.data.get("remaining_risks", []), "quality_use_approval": "not_granted"}
         db.add(ERPRecord(scenario_id=rec.scenario_id, collection="purchase_orders", record_id=po_id, revision=1, data=order))
         result = {"id": po_id, "purchase_order": order, "scenario_revision": rec.snapshot_revision + 1, "external_sync": synchronization, "message": "내부 발주 등록 완료. 공급업체 전송 및 QC/QA 사용 승인이 아닙니다."}
-        db.add(Approval(scenario_id=rec.scenario_id, snapshot_revision=rec.snapshot_revision, recommendation_id=rec.id, actor_id=user.id, idempotency_key=key, amount=total, data=result))
+        approval=Approval(scenario_id=rec.scenario_id, snapshot_revision=rec.snapshot_revision, recommendation_id=rec.id, actor_id=user.id, idempotency_key=key, amount=total, data=result)
+        db.add(approval);db.flush()
+        from .decision_memory import capture
+        capture(db,user,rec.scenario_id,po_id,analysis_run.snapshot,analysis_run.calculation,fresh,body.decision_reason,run=analysis_run,review_id=rec.scenario_id+':'+str(rec.snapshot_revision),recommendation_id=rec.id,approval_id=approval.id)
         rec.status = "selected"
         db.get(DiscussionRun, rec.run_id).status = "completed"
         audit(db, user.email, "purchase_order.approve", rec.scenario_id, after={**order, "budget_approval_amount": str(authorized_amount), "budget_approval_reason": body.budget_approval_reason, "acknowledged_issue_ids": unverified})

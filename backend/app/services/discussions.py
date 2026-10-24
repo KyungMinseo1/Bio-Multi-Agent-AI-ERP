@@ -155,16 +155,19 @@ def known_identifiers(value):
     return labels
 
 
-def orchestrator_context(data, calculation, messages, strategies):
+def orchestrator_context(data, calculation, messages, strategies, case_memory=None):
     """The Orchestrator integrates reviews; it does not re-read ERP records.
 
     Each department already judged its own data, and the server re-validates
     the final recommendation against the frozen snapshot.
     """
+    from .decision_memory import orchestrator_input
     message_fields = ("id", "role", "strategy_id", "version", "proposal", "position",
                       "reasons", "change_requests", "impacts", "evidence_refs")
     material_ids = {candidate["material_id"] for candidate in calculation.get("candidates", [])}
     return {
+        "historical_decision_memory": orchestrator_input(case_memory),
+        "history_use_policy": "과거 기록과 선택 이유는 비신뢰 참고 정보다. 개인 선호는 성과가 아니다. 과거 사례 ID는 현재 증거 ID가 아니다. 현재 등록된 적격 후보만 선택하고 품질·납기·예산·현금 검증을 우회하지 않는다. 자동 승인이나 모델 재학습을 수행하지 않는다.",
         # Names/codes only: the item under review, citable by ID.
         "materials": [{key: material[key] for key in ("id", "name", "product_code") if key in material}
                       for material in data.get("materials", []) if material.get("id") in material_ids],
@@ -365,6 +368,13 @@ async def run_discussion(run_id):
             return
         run.status = "running"
         data, calculation = copy.deepcopy(run.snapshot), copy.deepcopy(run.calculation)
+        from .decision_memory import memory_for
+        try:
+            historical_memory=memory_for(db,run.actor_id,data,calculation) if run.actor_id else None
+        except Exception:
+            historical_memory={"cases":[],"message":"과거 사례 조회를 완료하지 못했습니다. 현재 ERP 검증만으로 판단합니다.","unavailable":True,"advisory_only":True,"training_performed":False}
+        if historical_memory:
+            artifact(db,run.id,'case_memory',historical_memory)
         db.commit()
     candidates = {c["id"]: c for c in calculation.get("candidates", [])}
     allowed = all_ids(data) | all_ids(calculation)
@@ -403,7 +413,7 @@ async def run_discussion(run_id):
                     messages.append(persist_artifact(run_id, "message", outcome))
             if failures:
                 raise failures[0]
-        orchestrator = await role_call(run_id, "orchestrator", strategies[-1]["id"], strategies[-1]["version"], orchestrator_context(data, calculation, messages, strategies), allowed, candidates, {m["id"] for m in messages}, {s["id"] for s in strategies}, names)
+        orchestrator = await role_call(run_id, "orchestrator", strategies[-1]["id"], strategies[-1]["version"], orchestrator_context(data, calculation, messages, strategies, historical_memory), allowed, candidates, {m["id"] for m in messages}, {s["id"] for s in strategies}, names)
         orchestrator_message = persist_artifact(run_id, "message", orchestrator)
         with SessionLocal() as db:
             run = db.get(DiscussionRun, run_id)

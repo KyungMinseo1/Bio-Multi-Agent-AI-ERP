@@ -104,6 +104,7 @@ class DiscussionRun(Base):
     __tablename__ = "discussion_runs"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     scenario_id: Mapped[str] = mapped_column(ForeignKey("scenarios.id"), index=True)
+    actor_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     snapshot_revision: Mapped[int] = mapped_column(Integer)
     snapshot: Mapped[dict] = mapped_column(JSON)
     calculation: Mapped[dict] = mapped_column(JSON)
@@ -199,3 +200,18 @@ class Alert(Base):
     status: Mapped[str] = mapped_column(String(30))
     data: Mapped[dict] = mapped_column(JSON)
     acknowledgement: Mapped[dict | None] = mapped_column(JSON)
+
+
+class DecisionCase(Base):
+    __tablename__ = "decision_cases"
+    __table_args__ = (UniqueConstraint("scenario_id", "po_id", name="uq_decision_case_po"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    scenario_id: Mapped[str] = mapped_column(ForeignKey("scenarios.id"), index=True)
+    actor_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    po_id: Mapped[str] = mapped_column(String(100))
+    run_id: Mapped[str | None] = mapped_column(ForeignKey("discussion_runs.id"), nullable=True)
+    source_kind: Mapped[str] = mapped_column(String(20))
+    decision: Mapped[dict] = mapped_column(JSON)
+    outcome: Mapped[dict] = mapped_column(JSON, default=dict)
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)

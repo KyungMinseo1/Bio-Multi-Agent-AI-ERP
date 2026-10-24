@@ -179,7 +179,7 @@ def test_parallel_review_barrier_frozen_rounds_compact_context_and_orchestrator_
     ]
     # Discussion-only integration: no ERP records, only reviews plus the registered plan table.
     assert set(orchestrator) - {"assigned_role", "strategy_id", "version", "reference_contract", "impact_contract"} == {
-        "materials", "registered_candidates", "messages", "strategy_versions"}
+        "materials", "registered_candidates", "messages", "strategy_versions", "historical_decision_memory", "history_use_policy"}
     compact_candidates = {candidate["id"]: candidate for candidate in orchestrator["registered_candidates"]}
     assert set(compact_candidates) == {candidate["id"] for candidate in queued["calculation"]["candidates"]}
     for candidate in queued["calculation"]["candidates"]:

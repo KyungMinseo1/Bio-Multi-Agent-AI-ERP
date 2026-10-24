@@ -23,6 +23,6 @@ def test_team_migration_preserves_existing_supplier_and_mail_data(tmp_path,monke
         with engine.connect() as conn:
             assert json.loads(conn.execute(text("SELECT data FROM erp_records WHERE id='r'")).scalar())==data
             assert tuple(conn.execute(text("SELECT status,subject,delivery_mode,payload FROM outbound_emails WHERE id='old'")).one())==('sent','preserved','smtp',None)
-            assert conn.execute(text('SELECT version_num FROM alembic_version')).scalar()=='0003_quote_workflow'
+            assert conn.execute(text('SELECT version_num FROM alembic_version')).scalar()=='0004_decision_memory'
     finally:
         engine.dispose()

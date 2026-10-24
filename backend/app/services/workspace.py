@@ -111,11 +111,22 @@ def command(db, name, args, expected, user):
         args = {**args, 'externallySentVendors': [item.vendor_id for item in external if item.case_id == 'PR-IL7-20261024']}
     workflow = row.data['_workflow']
     review = (workflow.get('integration') or {}).get('externalReview')
+    if name == 'registerPO' and (args or {}).get('decision_reason') is not None and (not isinstance(args['decision_reason'],str) or len(args['decision_reason'])>2000):
+        raise HTTPException(422,'선택 이유는 2000자 이내 텍스트여야 합니다.')
     if name == 'registerPO' and review:
         rec = db.get(Recommendation, review.get('recommendationId'))
-        if not rec or rec.status != 'proposed' or review.get('stamp') != execute(workflow)['stamp']:
+        review_run=db.get(DiscussionRun,rec.run_id) if rec else None
+        if not rec or not review_run or review_run.actor_id not in (None,user.id) or rec.status != 'proposed' or review.get('stamp') != execute(workflow)['stamp']:
             raise HTTPException(409, '실제 AI 추천 원본/상태가 변경됐습니다.')
     value = execute(workflow, name, args)
+    if name == 'registerPO':
+        from .decision_memory import capture
+        before=execute(workflow)
+        order=value['workflow']['orders'][0]
+        decision_reason=(args or {}).get('decision_reason')
+        selected=next(c for c in before['projection']['_canonical_calculation']['candidates'] if c['original_vendor_id']==order['vendor']['id'])
+        state=before['projection'];state['revision']=expected
+        capture(db,user,WORKSPACE,order['id'],state,before['projection']['_canonical_calculation'],selected,decision_reason,review_id=order['caseId'],recommendation_id=(review or {}).get('recommendationId') or (workflow.get('integration') or {}).get('id'),approval_id=order['approval'],workspace_report=workflow.get('integration'))
     if name == 'registerPO' and review:
         rec.status = 'selected'
     return persist(db, value, expected, user.email, 'workspace.' + name)
@@ -127,7 +138,7 @@ def adopt(db, recommendation_id, expected, stamp, user):
     if not row or row.revision != expected or not rec or rec.scenario_id != WORKSPACE:
         raise HTTPException(409, '업무 또는 실제 AI 추천 버전 불일치')
     run = db.get(DiscussionRun, rec.run_id)
-    if rec.status != 'proposed' or run.status != 'awaiting_review' or rec.snapshot_revision != row.revision:
+    if run.actor_id not in (None,user.id) or rec.status != 'proposed' or run.status != 'awaiting_review' or rec.snapshot_revision != row.revision:
         raise HTTPException(409, '현재 버전에서 완료된 실제 AI 추천만 가져올 수 있습니다.')
     candidate = rec.data['candidate']
     summary = ' / '.join(x['claim'] for x in rec.data.get('rationale_items', []))

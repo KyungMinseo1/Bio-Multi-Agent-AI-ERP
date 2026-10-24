@@ -67,6 +67,7 @@ class DiscussionInput(StrictModel):
 
 
 class ApprovalInput(StrictModel):
+    decision_reason: str | None = Field(default=None, max_length=2000)
     expected_revision: int
     acknowledge_unverified: bool
     budget_approval_reason: str | None = None

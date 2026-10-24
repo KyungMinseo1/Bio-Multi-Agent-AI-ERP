@@ -261,10 +261,10 @@ def run_view(db, run, full=True):
 
 
 @api.get("/scenarios/{scenario_id}/discussions")
-def list_discussions(scenario_id: str, db=Depends(get_db)):
+def list_discussions(scenario_id: str, user=Depends(current_user), db=Depends(get_db)):
     ensure_scenario(db, scenario_id)
     db.commit()
-    return [run_view(db, r, False) for r in db.scalars(select(DiscussionRun).where(DiscussionRun.scenario_id == scenario_id).order_by(DiscussionRun.created_at.desc()))]
+    return [run_view(db, r, False) for r in db.scalars(select(DiscussionRun).where(DiscussionRun.scenario_id == scenario_id, (DiscussionRun.actor_id == user.id) | (DiscussionRun.actor_id.is_(None))).order_by(DiscussionRun.created_at.desc()))]
 
 
 @api.post("/scenarios/{scenario_id}/discussions", status_code=202)
@@ -289,7 +289,7 @@ def create_discussion(scenario_id: str, body: DiscussionInput, user=Depends(muta
         alert = db.get(Alert, body.alert_id)
         if not alert or alert.scenario_id != scenario_id:
             raise HTTPException(422, "Unknown alert_id for this scenario")
-    run = DiscussionRun(scenario_id=scenario_id, snapshot_revision=state["revision"], snapshot=state, calculation=calculation, progress={})
+    run = DiscussionRun(actor_id=user.id, scenario_id=scenario_id, snapshot_revision=state["revision"], snapshot=state, calculation=calculation, progress={})
     db.add(run)
     db.flush()
     db.add(Job(kind="discussion", scenario_id=scenario_id, payload={"run_id": run.id}))
@@ -300,25 +300,26 @@ def create_discussion(scenario_id: str, body: DiscussionInput, user=Depends(muta
 
 
 @api.get("/discussions/{run_id}")
-def get_discussion(run_id: str, db=Depends(get_db)):
+def get_discussion(run_id: str, user=Depends(current_user), db=Depends(get_db)):
     run = db.get(DiscussionRun, run_id)
-    if not run:
+    if not run or run.actor_id not in (None,user.id):
         raise HTTPException(404, "Discussion not found")
     return run_view(db, run)
 
 
 @api.get("/discussions/{run_id}/snapshot")
-def get_snapshot(run_id: str, db=Depends(get_db)):
+def get_snapshot(run_id: str, user=Depends(current_user), db=Depends(get_db)):
     run = db.get(DiscussionRun, run_id)
-    if not run:
+    if not run or run.actor_id not in (None,user.id):
         raise HTTPException(404, "Discussion not found")
     return {"snapshot": run.snapshot, "calculation": run.calculation}
 
 
 @api.get("/discussions/{run_id}/events")
-async def discussion_events(run_id: str, request: Request, last_event_id: str | None = Header(None)):
+async def discussion_events(run_id: str, request: Request, last_event_id: str | None = Header(None), user=Depends(current_user)):
     with SessionLocal() as db:
-        if not db.get(DiscussionRun, run_id):
+        event_run=db.get(DiscussionRun,run_id)
+        if not event_run or event_run.actor_id not in (None,user.id):
             raise HTTPException(404, "Discussion not found")
     try:
         start = int(last_event_id or request.query_params.get("after", "0"))
@@ -483,7 +484,7 @@ def global_link_issue(issue_id: str, body: dict, scenario_id: str, user=Depends(
 
 @api.get("/scenarios/{scenario_id}/audit")
 def audit_history(scenario_id: str, user=Depends(current_user), db=Depends(get_db)):
-    return [{"id": r.id, "actor": r.actor, "action": r.action, "created_at": utc_iso(r.created_at), "before": r.before, "after": r.after} for r in db.scalars(select(AuditEvent).where(AuditEvent.scenario_id == scenario_id).order_by(AuditEvent.created_at.desc()).limit(200))]
+    return [{"id": r.id, "actor": r.actor, "action": r.action, "created_at": utc_iso(r.created_at), "before": r.before, "after": r.after} for r in db.scalars(select(AuditEvent).where(AuditEvent.scenario_id == scenario_id, (~AuditEvent.action.like("decision.%")) | (AuditEvent.actor == user.email)).order_by(AuditEvent.created_at.desc()).limit(200))]
 
 
 def canonical_collection(value):
@@ -535,8 +536,8 @@ def patch_record(scenario_id: str, collection: str, record_id: str, body: dict, 
 
 
 @api.get("/discussions")
-def global_discussions(scenario_id: str = "baseline", db=Depends(get_db)):
-    return list_discussions(scenario_id, db)
+def global_discussions(scenario_id: str = "baseline", user=Depends(current_user), db=Depends(get_db)):
+    return list_discussions(scenario_id, user, db)
 
 
 @api.post("/discussions", status_code=202)
@@ -614,6 +615,8 @@ def local_demo_login(request: Request, response: Response, db=Depends(get_db)):
     response.set_cookie(COOKIE, token, httponly=True, samesite="strict", max_age=43200, path="/")
     return {"user": public_user(user), "mode": "local-demo"}
 
+from .decision_api import router as decision_router
+app.include_router(decision_router)
 app.include_router(api)
 
 # Production build and API share one origin; API routes are registered before the static mount.

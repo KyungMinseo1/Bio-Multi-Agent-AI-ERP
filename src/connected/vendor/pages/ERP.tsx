@@ -1,3 +1,4 @@
+import DecisionMemory from '../../../workflow/DecisionMemory';
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { ChevronRight, Edit3, FileJson, Plus, Save, Search, SlidersHorizontal } from 'lucide-react';
@@ -37,7 +38,7 @@ function RecordForm({ collection, original, close, saved }: { collection: Collec
 export default function ERP() {
   const { page = 'materials' } = useParams(); const keys = pageCollections[page] || ['materials'];
   const [tab, setTab] = useState(''); const [search, setSearch] = useState(''); const [editing, setEditing] = useState<Row | null>(null); const [detail, setDetail] = useState<Row | null>(null); const [success, setSuccess] = useState(false);
-  const { scenario, user } = useWorkspace();
+  const { scenarioId,scenario, user } = useWorkspace();
   const collection = collections[keys.includes(tab) ? tab : keys[0]]; const source = rows(scenario[collection.key.replaceAll('-', '_')]);
   const list = source.filter(row => Object.values(row).some(value => display(value).toLowerCase().includes(search.toLowerCase())));
   function cell(row: Row, key: string) {
@@ -70,6 +71,7 @@ export default function ERP() {
       </table></div> : <Empty title={search ? '검색 결과가 없습니다' : '아직 등록된 데이터가 없습니다'}>{search ? '다른 검색어로 다시 검색해 보세요.' : `${collection.title} 등록 버튼에서 현재 시나리오에 필요한 정보를 입력하세요.`}</Empty>}
       <div className="table-footer"><span>{list.length} / {source.length}개 레코드</span><span>시나리오별 독립 저장 · 수정 이력 보존</span></div>
     </Panel>
+    {collection.key==='purchase-orders'&&<DecisionMemory scenarioId={scenarioId} results/>}
     {editing && <RecordForm key={`${collection.key}-${text(editing.id)}`} collection={collection} original={editing} close={() => setEditing(null)} saved={() => setSuccess(true)}/>}
     {detail && <Modal title={text(detail.name || detail.code) || `${collection.title} 상세`} close={() => setDetail(null)}>
       <RecordDetails row={detail}/>
