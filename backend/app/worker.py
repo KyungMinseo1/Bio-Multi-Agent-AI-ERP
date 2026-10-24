@@ -18,7 +18,8 @@ def claim_job():
         job = db.scalar(select(Job).where(eligible).order_by(Job.created_at).with_for_update(skip_locked=True).limit(1))
         if not job:
             return None
-        result = db.execute(update(Job).where(Job.id == job.id, eligible).values(status="running", lease_until=moment + timedelta(minutes=5)))
+        # SQLite returns naive datetimes; skip Python-side evaluation against the aware `moment`.
+        result = db.execute(update(Job).where(Job.id == job.id, eligible).values(status="running", lease_until=moment + timedelta(minutes=5)).execution_options(synchronize_session=False))
         if result.rowcount != 1:
             db.rollback()
             return None

@@ -8,4 +8,7 @@ export async function getWorkspace(){const value=await api('/workspace') as Remo
 export async function saveWorkspace(workflow:Workflow,migration=false){if(revision===undefined)await getWorkspace();const result=await send('/workspace',{workflow,expected_revision:revision,migration},'PUT') as RemoteWorkspace;revision=result.revision;return result;}
 export async function serverCommand(command:string,args:Record<string,unknown>={}){if(revision===undefined)await getWorkspace();const value=await send('/workspace/commands',{command,args,expected_revision:revision}) as RemoteWorkspace;revision=value.revision;return value;}
 export async function adoptReview(recommendationId:string,stamp:string){const result=await send('/workspace/adopt-review',{recommendation_id:recommendationId,stamp,expected_revision:revision}) as RemoteWorkspace;revision=result.revision;return result;}
+export async function startWorkspaceDiscussion(){if(revision===undefined)await getWorkspace();return record(await send('/scenarios/main-workspace/discussions',{expected_revision:revision}));}
+export async function getDiscussion(id:string){return record(await api(`/discussions/${id}`));}
+export const workspaceStamp=async()=>String((await getWorkspace()).stamp??'');
 export async function loginLocal(){const result=record(await send('/auth/local-demo',{}));await getWorkspace();setServerEnabled(true);return record(result.user);}
