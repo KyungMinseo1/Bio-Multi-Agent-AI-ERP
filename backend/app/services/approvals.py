@@ -25,6 +25,8 @@ async def approve(db, recommendation_id, body, key, user):
     rec = db.get(Recommendation, recommendation_id)
     if not rec:
         raise HTTPException(404, "Recommendation not found")
+    if rec.scenario_id == "main-workspace":
+        raise HTTPException(409, "통합 업무의 추천을 주 업무 화면으로 가져와 2차 발주 승인을 진행하세요.")
     scenario = db.get(Scenario, rec.scenario_id)
     if body.expected_revision != rec.snapshot_revision or scenario.revision != rec.snapshot_revision:
         stale(db, rec)

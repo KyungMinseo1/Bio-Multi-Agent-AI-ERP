@@ -37,7 +37,7 @@ def client(monkeypatch):
     with engine.begin() as conn:
         conn.execute(text("CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) PRIMARY KEY)"))
         conn.execute(text("DELETE FROM alembic_version"))
-        conn.execute(text("INSERT INTO alembic_version VALUES ('0001_initial')"))
+        conn.execute(text("INSERT INTO alembic_version VALUES ('0002_outbound_emails')"))
     monkeypatch.setenv("LLM_PROVIDER", "")
     monkeypatch.setenv("LLM_ROLE_MAPPING", "{}")
     with TestClient(app) as value:

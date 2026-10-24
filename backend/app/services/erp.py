@@ -55,6 +55,7 @@ def ensure_scenario(db, scenario_id):
 def snapshot(db, scenario_id):
     row = ensure_scenario(db, scenario_id)
     data = copy.deepcopy(row.data)
+    data.pop('_workflow', None)
     data.update(id=scenario_id, revision=row.revision)
     data.update({key: [] for key in COLLECTIONS})
     records = db.scalars(select(ERPRecord).where(ERPRecord.scenario_id == scenario_id).order_by(ERPRecord.collection, ERPRecord.record_id)).all()
@@ -217,6 +218,8 @@ def validate_record(data, collection, state, previous=None):
 
 
 def mutate(db, scenario_id, collection, body, actor, record_id=None):
+    if scenario_id == "main-workspace":
+        raise HTTPException(409, "통합 업무의 원본은 구매요청·원료·생산·공급업체 폼에서 수정한 뒤 서버에 저장하세요. 파생 ERP 표를 별도로 수정할 수 없습니다.")
     if collection not in COLLECTIONS:
         raise HTTPException(404, "Unknown collection")
     state = snapshot(db, scenario_id)

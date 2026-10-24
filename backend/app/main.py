@@ -5,6 +5,7 @@ import json
 import secrets
 from contextlib import asynccontextmanager
 from datetime import timedelta
+from email.utils import make_msgid
 from urllib.parse import urlsplit
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request, Response, Header
 from fastapi.responses import StreamingResponse
@@ -14,8 +15,8 @@ from . import models
 from .auth import COOKIE, approver, bootstrap_accounts, current_user, mutation_user, public_user, token_hash, verify_password
 from .config import COLLECTIONS, setting, planning_date, review_rounds
 from .db import get_db, SessionLocal, assert_migrated
-from .models import User, Session, Scenario, ERPRecord, Job, DiscussionRun, RunArtifact, Recommendation, ExternalSource, ExternalIssue, IssueEvidence, CollectionRun, AuditEvent, Alert, uid, now
-from .schemas import Login, DiscussionInput, ApprovalInput, DepartmentTurn
+from .models import User, Session, Scenario, ERPRecord, Job, DiscussionRun, RunArtifact, Recommendation, ExternalSource, ExternalIssue, IssueEvidence, CollectionRun, AuditEvent, Alert, OutboundEmail, uid, now
+from .schemas import Login, DiscussionInput, ApprovalInput, DepartmentTurn, QuoteEmailInput
 from .providers import require_configuration, public_settings, ProviderError, generate_json, close_clients
 from .scenarios import list_scenarios
 from .services.erp import ensure_scenario, snapshot, mutate, audit, lock_revision, enqueue_recalculation
@@ -25,6 +26,7 @@ from .services.discussions import artifact
 from .services.external_sources import seed_sources, sync_source, validate_url, public_addresses, CollectionError
 from .services.planning import evaluate
 from .models import utc_iso
+from .services.mailer import MailConfigurationError, MailDeliveryError, mail_configuration, public_mail_settings, send_quote_email, validate_email_address
 
 
 @asynccontextmanager
@@ -50,7 +52,104 @@ def health():
 @api.get("/settings")
 def settings(db=Depends(get_db)):
     auth = bool(setting("SESSION_SECRET") and db.scalar(select(User.id).limit(1)))
-    return {"setup_required": not auth, "auth_configured": auth, "llm": public_settings(), "planning_as_of": planning_date(), "external_collection": {"configured": True, "limitations": "Public rolling feeds do not guarantee supply-chain coverage. Relevance requires human confirmation."}}
+    return {"setup_required": not auth, "auth_configured": auth, "local_demo_available": setting("BIOFLOW_LOCAL_DEMO") == "1", "llm": public_settings(), "planning_as_of": planning_date(), "external_collection": {"configured": True, "limitations": "Public rolling feeds do not guarantee supply-chain coverage. Relevance requires human confirmation."}}
+
+
+@api.get("/mail/settings")
+def email_settings(user=Depends(approver)):
+    return public_mail_settings()
+
+
+@api.get("/mail/outbox")
+def email_outbox(case_id: str, user=Depends(approver), db=Depends(get_db)):
+    rows = db.scalars(
+        select(OutboundEmail)
+        .where(OutboundEmail.case_id == case_id)
+        .order_by(OutboundEmail.created_at.desc())
+        .limit(50)
+    ).all()
+    return [{
+        "id": row.id, "case_id": row.case_id, "vendor_id": row.vendor_id,
+        "vendor_name": row.vendor_name, "sender": row.sender, "recipient": row.recipient,
+        "subject": row.subject, "status": row.status, "message_id": row.message_id,
+        "error_code": row.error_code, "created_at": utc_iso(row.created_at),
+    } for row in rows]
+
+
+@api.post("/mail/quote-requests")
+def send_quote_request(
+    body: QuoteEmailInput,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    user=Depends(approver),
+    db=Depends(get_db),
+):
+    if len(idempotency_key) < 16 or len(idempotency_key) > 200:
+        raise HTTPException(422, "유효한 Idempotency-Key가 필요합니다.")
+    config = mail_configuration()
+    if not config.configured:
+        raise HTTPException(503, detail={"code": "mail_not_configured", "message": "서버 SMTP 설정이 필요합니다."})
+    try:
+        sender = validate_email_address(body.sender_email)
+        validate_email_address(body.recipient_email)
+        if sender not in config.allowed_senders:
+            raise ValueError("발신 주소가 서버 허용 목록에 없습니다.")
+        if "\r" in body.subject or "\n" in body.subject:
+            raise ValueError("제목에 줄바꿈을 넣을 수 없습니다.")
+        for line in body.schedule:
+            from datetime import date
+            date.fromisoformat(line.needed_date)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+
+    prior = db.scalar(select(OutboundEmail).where(OutboundEmail.idempotency_key == idempotency_key))
+    if prior:
+        if prior.status == "sent":
+            return {"id": prior.id, "status": prior.status, "message_id": prior.message_id, "created_at": utc_iso(prior.created_at), "already_sent": True}
+        raise HTTPException(409, detail={"code": "mail_request_exists", "message": "같은 발송 요청이 이미 접수되었습니다. 발송 이력을 확인하세요.", "status": prior.status})
+
+    delivery = OutboundEmail(
+        id=uid(), idempotency_key=idempotency_key, case_id=body.case_id,
+        vendor_id=body.vendor_id, vendor_name=body.vendor_name, actor_id=user.id,
+        sender=sender, recipient=body.recipient_email.strip().lower(), subject=body.subject.strip(),
+        status="sending", created_at=now(), updated_at=now(),
+    )
+    db.add(delivery)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        prior = db.scalar(select(OutboundEmail).where(OutboundEmail.idempotency_key == idempotency_key))
+        if prior and prior.status == "sent":
+            return {"id": prior.id, "status": prior.status, "message_id": prior.message_id, "created_at": utc_iso(prior.created_at), "already_sent": True}
+        raise HTTPException(409, detail={"code": "mail_request_exists", "message": "같은 발송 요청이 이미 접수되었습니다. 발송 이력을 확인하세요."}) from None
+
+    message_id = make_msgid(domain="bioflow.local")
+    try:
+        sent_message_id, attachment_name = send_quote_email(body, message_id)
+    except (MailConfigurationError, MailDeliveryError, ValueError) as exc:
+        delivery.status = "failed"
+        delivery.error_code = "configuration" if isinstance(exc, MailConfigurationError) else type(exc).__name__
+        delivery.updated_at = now()
+        db.add(AuditEvent(scenario_id=body.case_id, actor=user.email, action="견적 메일 발송 실패", before=None,
+                          after={"dispatch_id": delivery.id, "vendor_id": body.vendor_id, "recipient": delivery.recipient,
+                                 "error_code": delivery.error_code}))
+        db.commit()
+        if isinstance(exc, MailConfigurationError):
+            raise HTTPException(503, detail={"code": "mail_not_configured", "message": "발신 주소 또는 SMTP 설정을 확인하세요."}) from None
+        if isinstance(exc, ValueError):
+            raise HTTPException(422, str(exc)) from None
+        raise HTTPException(502, detail={"code": "mail_delivery_failed", "message": "메일 서버가 발송을 완료하지 못했습니다. 발송 이력 상태를 확인하세요."}) from None
+
+    delivery.status = "sent"
+    delivery.message_id = sent_message_id
+    delivery.updated_at = now()
+    db.add(AuditEvent(scenario_id=body.case_id, actor=user.email, action="견적 요청 메일 발송", before=None,
+                      after={"dispatch_id": delivery.id, "vendor_id": body.vendor_id, "vendor_name": body.vendor_name,
+                             "sender": sender, "recipient": delivery.recipient, "subject": delivery.subject,
+                             "attachment": attachment_name, "message_id": sent_message_id}))
+    db.commit()
+    return {"id": delivery.id, "status": delivery.status, "message_id": sent_message_id,
+            "attachment_name": attachment_name, "created_at": utc_iso(delivery.created_at), "already_sent": False}
 
 
 @api.post("/settings/test-provider")
@@ -96,7 +195,7 @@ def logout(request: Request, response: Response, user=Depends(mutation_user), db
 
 @api.get("/scenarios")
 def scenarios(db=Depends(get_db)):
-    return [{**s, "revision": db.get(Scenario, s["id"]).revision if db.get(Scenario, s["id"]) else s.get("revision", 1)} for s in list_scenarios()]
+    return ([{"id": "main-workspace", "name": "현재 BioFlow 통합 업무", "description": "현재 ERP 원본·2단계 승인·등록 PO와 동일한 업무", "is_synthetic": True, "revision": db.get(Scenario, "main-workspace").revision}] if db.get(Scenario, "main-workspace") else []) + [{**s, "revision": db.get(Scenario, s["id"]).revision if db.get(Scenario, s["id"]) else s.get("revision", 1)} for s in list_scenarios()]
 
 
 def merged_issues(db, state):
@@ -171,6 +270,13 @@ def list_discussions(scenario_id: str, db=Depends(get_db)):
 
 @api.post("/scenarios/{scenario_id}/discussions", status_code=202)
 def create_discussion(scenario_id: str, body: DiscussionInput, user=Depends(mutation_user), db=Depends(get_db)):
+    if scenario_id == "main-workspace":
+        from .services.workspace import execute
+        row = db.get(Scenario, scenario_id)
+        if not row or not row.data.get("_workflow", {}).get("approvals"):
+            raise HTTPException(409, "공급업체 확인 1차 승인이 필요합니다.")
+        from .services.workspace import command as workspace_command
+        checked = execute(row.data["_workflow"], "analyze")
     try:
         require_configuration()
     except ProviderError as exc:
@@ -445,6 +551,30 @@ def global_create_discussion(body: dict, user=Depends(mutation_user), db=Depends
     return create_discussion(scenario_id, request, user, db)
 
 
+from .services import workspace as workspace_service
+
+@api.get("/workspace")
+def workspace_get(user=Depends(current_user), db=Depends(get_db)):
+    row = db.get(Scenario, workspace_service.WORKSPACE)
+    if not row:
+        return {"revision": 0, "workflow": None, "scenario_id": workspace_service.WORKSPACE}
+    return workspace_service.view(row)
+
+@api.put("/workspace")
+def workspace_put(body: dict, user=Depends(mutation_user), db=Depends(get_db)):
+    if not isinstance(body.get("expected_revision"), int) or not isinstance(body.get("workflow"), dict):
+        raise HTTPException(422, "workflow와 expected_revision이 필요합니다.")
+    return workspace_service.upload(db, body["workflow"], body["expected_revision"], user, body.get("migration") is True)
+
+@api.post("/workspace/commands")
+def workspace_command(body: dict, user=Depends(mutation_user), db=Depends(get_db)):
+    return workspace_service.command(db, body.get("command"), body.get("args", {}), body.get("expected_revision"), user)
+
+@api.post("/workspace/adopt-review")
+def workspace_adopt(body: dict, user=Depends(approver), db=Depends(get_db)):
+    return workspace_service.adopt(db, body.get("recommendation_id"), body.get("expected_revision"), body.get("stamp"), user)
+
+
 @api.get("/{collection}")
 def global_records(collection: str, scenario_id: str = "baseline", db=Depends(get_db)):
     return list_records(scenario_id, collection, db)
@@ -465,4 +595,32 @@ def global_patch_record(collection: str, record_id: str, body: dict, scenario_id
     return patch_record(scenario_id, collection, record_id, body, user, db)
 
 
+@api.post("/auth/local-demo")
+def local_demo_login(request: Request, response: Response, db=Depends(get_db)):
+    from ipaddress import ip_address
+    from urllib.parse import urlsplit
+    try:
+        peer_ok = ip_address(request.client.host).is_loopback
+    except ValueError:
+        peer_ok = request.client.host == "testclient"
+    origin = request.headers.get("origin", "")
+    if setting("BIOFLOW_LOCAL_DEMO") != "1" or not peer_ok or (origin and urlsplit(origin).hostname not in {"127.0.0.1", "localhost", "::1"}):
+        raise HTTPException(403, "명시적으로 활성화한 로컬 시연 서버에서만 사용 가능합니다.")
+    user = db.scalar(select(User).where(User.email == setting("INITIAL_APPROVER_EMAIL").lower()))
+    if not user:
+        raise HTTPException(503, "로컬 시연 계정 초기화 필요")
+    token = secrets.token_urlsafe(48)
+    db.add(Session(token_hash=token_hash(token), user_id=user.id, expires_at=now() + timedelta(hours=12)))
+    db.commit()
+    response.set_cookie(COOKIE, token, httponly=True, samesite="strict", max_age=43200, path="/")
+    return {"user": public_user(user), "mode": "local-demo"}
+
 app.include_router(api)
+
+# Production build and API share one origin; API routes are registered before the static mount.
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
+_dist = Path(__file__).resolve().parents[2] / "dist"
+if _dist.exists():
+    app.mount("/", StaticFiles(directory=_dist, html=True), name="bioflow-web")
+

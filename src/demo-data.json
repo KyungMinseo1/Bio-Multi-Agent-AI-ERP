@@ -1,0 +1,318 @@
+{
+  "meta": {
+    "baseDate": "2026-10-24",
+    "fictional": true,
+    "scenarioBudget": 9000000,
+    "delayLossAssumption": 18000000
+  },
+  "materials": [
+    {
+      "id": "RM-001",
+      "name": "FGF-2",
+      "desc": "섬유아세포 성장인자",
+      "stock": 18,
+      "daily": 3,
+      "unit": "mg",
+      "lot": "FG-261001",
+      "expiry": "2027-04-01",
+      "storage": "−20°C",
+      "price": 118000,
+      "supplier": "바이오넥스",
+      "quality": "승인"
+    },
+    {
+      "id": "RM-002",
+      "name": "EGF",
+      "desc": "상피세포 성장인자",
+      "stock": 84,
+      "daily": 2,
+      "unit": "mg",
+      "lot": "EG-260915",
+      "expiry": "2027-03-15",
+      "storage": "−20°C",
+      "price": 76000,
+      "supplier": "셀리온 바이오",
+      "quality": "승인"
+    },
+    {
+      "id": "RM-003",
+      "name": "IL-2",
+      "desc": "인터루킨 2",
+      "stock": 42,
+      "daily": 3,
+      "unit": "mg",
+      "lot": "IL2-261010",
+      "expiry": "2027-04-10",
+      "storage": "−80°C",
+      "price": 95000,
+      "supplier": "이뮤노랩",
+      "quality": "승인"
+    },
+    {
+      "id": "RM-004",
+      "name": "IL-7",
+      "desc": "인터루킨 7",
+      "stock": 56,
+      "daily": 1,
+      "unit": "mg",
+      "lot": "IL7-260920",
+      "expiry": "2027-03-20",
+      "storage": "−80°C",
+      "price": 142000,
+      "supplier": "이뮤노랩",
+      "quality": "승인"
+    },
+    {
+      "id": "RM-005",
+      "name": "IL-15",
+      "desc": "인터루킨 15",
+      "stock": 22,
+      "daily": 2,
+      "unit": "mg",
+      "lot": "IL15-261002",
+      "expiry": "2027-02-02",
+      "storage": "−80°C",
+      "price": 168000,
+      "supplier": "노바셀 사이언스",
+      "quality": "승인"
+    },
+    {
+      "id": "RM-006",
+      "name": "TGF-β1",
+      "desc": "형질전환 성장인자",
+      "stock": 45,
+      "daily": 1.5,
+      "unit": "mg",
+      "lot": "TG-261005",
+      "expiry": "2027-04-05",
+      "storage": "−20°C",
+      "price": 135000,
+      "supplier": "셀리온 바이오",
+      "quality": "승인"
+    },
+    {
+      "id": "RM-007",
+      "name": "VEGF-A",
+      "desc": "혈관내피 성장인자",
+      "stock": 62,
+      "daily": 2,
+      "unit": "mg",
+      "lot": "VG-260928",
+      "expiry": "2027-03-28",
+      "storage": "−20°C",
+      "price": 126000,
+      "supplier": "바이오넥스",
+      "quality": "승인"
+    },
+    {
+      "id": "RM-008",
+      "name": "IGF-1",
+      "desc": "인슐린 유사 성장인자",
+      "stock": 105,
+      "daily": 3,
+      "unit": "mg",
+      "lot": "IG-261012",
+      "expiry": "2027-04-12",
+      "storage": "−20°C",
+      "price": 82000,
+      "supplier": "젠큐어",
+      "quality": "승인"
+    },
+    {
+      "id": "RM-009",
+      "name": "GM-CSF",
+      "desc": "과립구 대식세포 자극인자",
+      "stock": 38,
+      "daily": 1,
+      "unit": "mg",
+      "lot": "GM-260901",
+      "expiry": "2026-11-15",
+      "storage": "−80°C",
+      "price": 156000,
+      "supplier": "노바셀 사이언스",
+      "quality": "승인"
+    },
+    {
+      "id": "RM-010",
+      "name": "SCF",
+      "desc": "줄기세포 인자",
+      "stock": 48,
+      "daily": 1,
+      "unit": "mg",
+      "lot": "SC-261015",
+      "expiry": "2027-04-15",
+      "storage": "−20°C",
+      "price": 178000,
+      "supplier": "셀리온 바이오",
+      "quality": "승인"
+    },
+    {
+      "id": "RM-011",
+      "name": "HGF",
+      "desc": "간세포 성장인자",
+      "stock": 32,
+      "daily": 0.5,
+      "unit": "mg",
+      "lot": "HG-260930",
+      "expiry": "2027-03-30",
+      "storage": "−20°C",
+      "price": 198000,
+      "supplier": "젠큐어",
+      "quality": "검토 중"
+    },
+    {
+      "id": "RM-012",
+      "name": "TNF-α",
+      "desc": "종양괴사인자 알파",
+      "stock": 60,
+      "daily": 1.5,
+      "unit": "mg",
+      "lot": "TN-261008",
+      "expiry": "2027-04-08",
+      "storage": "−80°C",
+      "price": 112000,
+      "supplier": "오리진 바이오",
+      "quality": "승인"
+    }
+  ],
+  "suppliers": [
+    {
+      "id": "A",
+      "name": "셀리온 바이오",
+      "en": "Cellion Bio",
+      "country": "대한민국 · 대전",
+      "price": 98000,
+      "lead": 12,
+      "qc": 2,
+      "quality": true,
+      "rating": 98.2,
+      "orders": 28
+    },
+    {
+      "id": "B",
+      "name": "바이오넥스",
+      "en": "Bionex",
+      "country": "대한민국 · 인천",
+      "price": 118000,
+      "lead": 4,
+      "qc": 2,
+      "quality": true,
+      "rating": 99.1,
+      "orders": 42
+    },
+    {
+      "id": "C",
+      "name": "노바셀 사이언스",
+      "en": "Novacell Science",
+      "country": "대한민국 · 성남",
+      "price": 124000,
+      "lead": 5,
+      "qc": 2,
+      "quality": true,
+      "rating": 97.8,
+      "orders": 19
+    },
+    {
+      "id": "D",
+      "name": "이뮤노랩",
+      "en": "Immuno Lab",
+      "country": "대한민국 · 서울",
+      "price": 108000,
+      "lead": 6,
+      "qc": 4,
+      "quality": false,
+      "rating": 96.5,
+      "orders": 16
+    },
+    {
+      "id": "E",
+      "name": "젠큐어",
+      "en": "Genecure",
+      "country": "대한민국 · 수원",
+      "price": 132000,
+      "lead": 8,
+      "qc": 2,
+      "quality": true,
+      "rating": 98.4,
+      "orders": 24
+    },
+    {
+      "id": "F",
+      "name": "오리진 바이오",
+      "en": "Origin Bio",
+      "country": "대한민국 · 청주",
+      "price": 115000,
+      "lead": 10,
+      "qc": 3,
+      "quality": false,
+      "rating": 95.8,
+      "orders": 12
+    }
+  ],
+  "plans": [
+    {
+      "id": "PR-2611-01",
+      "name": "줄기세포 배양 · Batch 024",
+      "material": "FGF-2",
+      "start": "2026-11-02",
+      "amount": 60,
+      "status": "원료 확보 필요"
+    },
+    {
+      "id": "PR-2611-02",
+      "name": "면역세포 확장 · Batch 018",
+      "material": "IL-2",
+      "start": "2026-11-09",
+      "amount": 30,
+      "status": "발주 검토"
+    },
+    {
+      "id": "PR-2611-03",
+      "name": "NK 세포 배양 · Batch 011",
+      "material": "IL-15",
+      "start": "2026-11-06",
+      "amount": 24,
+      "status": "발주 검토"
+    },
+    {
+      "id": "PR-2611-04",
+      "name": "성장인자 배지 · Batch 032",
+      "material": "EGF",
+      "start": "2026-11-12",
+      "amount": 20,
+      "status": "준비 완료"
+    }
+  ],
+  "initialOrders": [
+    {
+      "id": "PO-2610-014",
+      "material": "EGF",
+      "supplier": "셀리온 바이오",
+      "quantity": 60,
+      "cost": 4560000,
+      "date": "2026-10-19",
+      "available": "2026-10-26",
+      "status": "운송 중"
+    },
+    {
+      "id": "PO-2610-013",
+      "material": "IL-7",
+      "supplier": "이뮤노랩",
+      "quantity": 30,
+      "cost": 4260000,
+      "date": "2026-10-16",
+      "available": "2026-10-23",
+      "status": "입고 완료"
+    },
+    {
+      "id": "PO-2610-012",
+      "material": "VEGF-A",
+      "supplier": "바이오넥스",
+      "quantity": 40,
+      "cost": 5040000,
+      "date": "2026-10-14",
+      "available": "2026-10-20",
+      "status": "입고 완료"
+    }
+  ]
+}

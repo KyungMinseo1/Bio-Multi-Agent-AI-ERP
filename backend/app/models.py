@@ -64,6 +64,25 @@ class AuditEvent(Base):
     after: Mapped[dict | None] = mapped_column(JSON)
 
 
+class OutboundEmail(Base):
+    __tablename__ = "outbound_emails"
+    __table_args__ = (UniqueConstraint("idempotency_key"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    case_id: Mapped[str] = mapped_column(String(100), index=True)
+    vendor_id: Mapped[str] = mapped_column(String(100))
+    vendor_name: Mapped[str] = mapped_column(String(200))
+    actor_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    sender: Mapped[str] = mapped_column(String(254))
+    recipient: Mapped[str] = mapped_column(String(254))
+    subject: Mapped[str] = mapped_column(String(250))
+    status: Mapped[str] = mapped_column(String(30), index=True)
+    message_id: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
 class Job(Base):
     __tablename__ = "jobs"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

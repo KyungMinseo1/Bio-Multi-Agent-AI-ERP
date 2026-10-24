@@ -1,0 +1,32 @@
+.team-console{--teal:#2e5d8a;--teal-dark:#254e76;--border:#c6d1dd;--muted:#63778f;--shadow:none;background:transparent;font-family:inherit;font-size:15px;color:#293e57}.team-console button,.team-console input,.team-console select,.team-console textarea{font:inherit}.team-console .panel,.team-console .notice,.team-console .button,.team-console .badge,.team-console .department-summary article,.team-console .candidate-card{border-radius:2px;box-shadow:none;background-image:none}.team-console .panel{margin-top:17px;border:1px solid #c6d1dd}.team-console .page-heading{margin:24px 0 19px}.team-console .page-heading h1{font-size:27px}.team-console .page-heading p{font-size:14px}.team-console .button{font-size:14px;padding:9px 13px}.team-console .badge,.team-console .text-button,.team-console .muted,.team-console small{font-size:12px}.team-console table{font-size:14px}.team-console table th,.team-console table td{font-size:14px;padding:13px}.team-console .department-summary h3{font-size:20px;line-height:1.85}.team-console .modal-backdrop{z-index:180}.connected-heading{border-bottom:1px solid #bbc8d7;padding-bottom:19px;margin-bottom:19px}.connected-heading h1{font-size:29px;font-weight:650;color:#294766}.connected-heading p{font-size:15px;color:#657a93;margin-top:8px}.connected-login{background:white;border:1px solid #c6d1dd;padding:24px;max-width:900px}.connected-login h2{font-size:21px;margin-bottom:12px}.connected-login p{margin:14px 0;font-size:14px;color:#63788f}.connected-login form{display:flex;align-items:end;gap:16px;flex-wrap:wrap;border-top:1px solid #d6dee9;margin-top:22px;padding-top:20px}.connected-login label,.connected-scenario label{display:flex;flex-direction:column;gap:7px;font-size:14px}.connected-login input,.connected-scenario select{background:white;border:1px solid #aebed0;padding:10px;border-radius:1px;min-width:230px}.connected-status{display:flex;gap:21px;flex-wrap:wrap;background:#fff;border:1px solid #c6d1dd;padding:15px;font-size:13px}.connected-status button{color:#2d5d8b;margin-left:auto}.connected-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:17px 0}.connected-actions label{font-size:13px;display:flex;gap:8px;align-items:center}.connected-scenario{display:flex;gap:20px;align-items:end;flex-wrap:wrap;margin:22px 0 18px}.connected-scenario span{font-size:13px;color:#6d7e93;padding-bottom:10px}.connected-tabs{display:flex;flex-wrap:wrap;background:#e5ecf4;border:1px solid #bfcddd;margin-bottom:20px}.team-console .connected-tabs a{padding:11px 13px;border-right:1px solid #cbd6e3;font-size:14px;color:#3a5d7f}.team-console .connected-tabs a:hover{background:white}.connected-confirm{background:#fff7e9;border:1px solid #d4bd93;padding:20px;margin:20px 0}.connected-confirm p{margin-bottom:17px}.connected-confirm button{margin-right:12px}.team-console .table-scroll{overflow:auto}.team-console .metric-card{border-radius:1px;box-shadow:none}.team-console .candidate-card.recommended{border-color:#7192b2}.team-console .role-progress{gap:10px}.team-console .role-state{border-radius:1px}.team-console .eyebrow{font-size:11px}.wf-server-indicator{padding:9px 24px;border-bottom:1px solid #c6d1dd;background:#f3f7fb;font-size:13px;color:#486986;display:flex;gap:16px;align-items:center}.wf-server-indicator button{color:#315e86;text-decoration:underline;margin-left:auto}
+
+/* Keep imported ERP pages readable beside the larger BioFlow workflow UI. */
+.team-console{font-size:16px;line-height:1.7}
+.team-console .page-heading{margin:22px 0 20px}
+.team-console .page-heading h1,.connected-heading h1{font-size:32px;line-height:1.35}
+.team-console .page-heading p,.connected-heading p{font-size:16px;line-height:1.75}
+.team-console .panel-heading h2{font-size:21px}
+.team-console .panel-heading p,.team-console .section-heading p{font-size:15px;line-height:1.75}
+.team-console .button{font-size:16px;min-height:42px;padding:10px 15px}
+.team-console .button.small{font-size:14px;min-height:36px}
+.team-console .text-button,.team-console .inline-link{font-size:14px}
+.team-console .badge{font-size:13px;padding:4px 8px}
+.team-console .notice,.team-console .run-status-strip,.team-console .decision-steps{font-size:15px;line-height:1.7}
+.team-console .table-toolbar p,.team-console .comparison-context{font-size:15px;line-height:1.7}
+.team-console table{font-size:16px}
+.team-console table th,.team-console table td{font-size:16px;padding:14px}
+.team-console th{font-size:15px}
+.team-console td,.team-console .table-primary{font-size:16px;line-height:1.65}
+.team-console .role-state strong{font-size:16px}
+.team-console .role-state small{font-size:13px}
+.team-console .department-heading strong{font-size:16px}
+.team-console .department-heading small{font-size:13px}
+.team-console .department-summary h3{font-size:21px;line-height:1.75}
+.team-console .department-reasons,.team-console .rationale-list strong{font-size:16px;line-height:1.75}
+.team-console .candidate-card h3{font-size:20px}
+.team-console .candidate-checks,.team-console .candidate-reasons{font-size:15px;line-height:1.7}
+.team-console .discussion-list strong{font-size:16px}
+.team-console .discussion-list p,.team-console .table-footer{font-size:14px}
+.team-console .metric-card strong{font-size:25px}
+.team-console pre{font-size:13px}
+@media(max-width:800px){.team-console{font-size:15px}.team-console .page-heading h1,.connected-heading h1{font-size:27px}.team-console table th,.team-console table td,.team-console td{font-size:14px}.team-console .department-summary h3{font-size:19px}.team-console .department-reasons{font-size:15px}}

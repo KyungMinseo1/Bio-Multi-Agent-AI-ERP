@@ -559,6 +559,11 @@ def generate_candidates(data, material, quantity, as_of):
 
 
 def evaluate(data, as_of=None):
+    if data.get("canonical_workspace"):
+        from copy import deepcopy
+        value = deepcopy(data["_canonical_calculation"])
+        value["revision"] = data.get("revision", value["revision"])
+        return value
     as_of = day(as_of or data.get("as_of") or date.today())
     result = {"scenario_id": data["id"], "revision": data.get("revision", 1), "as_of": as_of,
               "materials": [], "alerts": [], "candidates": [], "timelines": {}, "evidence": []}
@@ -644,6 +649,8 @@ def validate_strategy(data, strategy, as_of=None):
     known = next((c for c in current["candidates"] if c["id"] == candidate_id), None)
     if known and (not strategy.get("deliveries") or strategy["deliveries"] == known["deliveries"]):
         return known
+    if data.get("canonical_workspace"):
+        raise ValueError("통합 업무는 공유 엔진이 검증한 등록 공급안만 사용할 수 있습니다.")
     material = next((m for m in data.get("materials", []) if m["id"] == strategy.get("material_id")), None)
     if material is None:
         raise ValueError("Unknown strategy material")

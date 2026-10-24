@@ -71,3 +71,25 @@ class ApprovalInput(StrictModel):
     acknowledge_unverified: bool
     budget_approval_reason: str | None = None
     budget_approval_amount: str | None = None
+
+
+class QuoteScheduleLine(StrictModel):
+    production_id: str = Field(min_length=1, max_length=80)
+    needed_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    quantity: int = Field(ge=1, le=10000)
+
+
+class QuoteEmailInput(StrictModel):
+    case_id: str = Field(min_length=1, max_length=100)
+    vendor_id: str = Field(min_length=1, max_length=100)
+    vendor_name: str = Field(min_length=1, max_length=200)
+    sender_email: str = Field(min_length=3, max_length=254)
+    recipient_email: str = Field(min_length=3, max_length=254)
+    subject: str = Field(min_length=2, max_length=250)
+    body: str = Field(min_length=10, max_length=12000)
+    material_code: str = Field(min_length=1, max_length=100)
+    material_name: str = Field(min_length=1, max_length=200)
+    unit: str = Field(min_length=1, max_length=40)
+    required_quantity: int = Field(ge=1, le=10000)
+    safety_stock: int = Field(ge=0, le=10000)
+    schedule: list[QuoteScheduleLine] = Field(min_length=1, max_length=24)
