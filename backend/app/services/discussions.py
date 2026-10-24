@@ -13,11 +13,11 @@ from .planning import validate_strategy
 
 REVIEWERS = CANONICAL_ROLES[:-1]
 ROLE_GOALS = {
-    "purchasing": "사용자의 구매 AI로서 승인 원료 적기 확보, 등록 견적과 공급 확약을 비교하고 구매 조건과 공급 불확실성을 검토한다.",
-    "inventory_planning": "재고와 생산계획을 함께 검토한다. 자유 가용 재고, 유효기한, 잔량 폐기와 보관 공간, QC/QA 완료 후 사용 가능일, 고객 납기와 생산 투입일을 확인한다. 승인 공정을 유지하며 임의 감량이나 원료 대체는 허용하지 않는다.",
-    "quality": "QC와 QA를 함께 검토한다. Lot별 시험, 문서, 시험 슬롯과 추가 시험비, 업체/제품 승인, CoA, 운송 온도와 확인된 품질 이슈를 검토한다. 발주 승인은 사용 승인이 아니다.",
-    "finance": "구매/운송/시험/보관/폐기 총비용, 생산별 예산과 지급일별 현금 한도를 검토한다.",
-    "admin": "모든 회차의 네 검토 AI 의견, 이견과 계산 검증을 종합하여 최선의 적격안을 우선순위대로 추천한다. 미해결 이견과 불확실성을 보존하고 사람의 최종 승인을 요청한다.",
+    "purchasing": "발주 담당자의 구매 AI다. A/B/C 등 등록안을 MOQ·주문배수·단가와 구매총액·운송·회차별 공급 확약·변경 조건으로 비교해 자신의 우선안 또는 판단 보류 의견을 제시한다. 자기 제안을 수용한다고 쓰지 않는다.",
+    "inventory_planning": "장부가 아닌 투입일별 자유 가용 재고를 기준으로 등록안을 비교한다. 각 안의 투입 대응, 만료 잔량·폐기, 보관 공간과 지연에 취약한 구간을 설명한다. 입고일과 QC/QA 후 사용 가능 예상일을 구분하며 임의 감량·대체를 제안하지 않는다.",
+    "quality": "QC/QA 관점에서 각 안의 Lot별 시험·문서·슬롯·추가 시험 부담, 업체/제품 승인·CoA·온도 기록·확인된 품질 이슈를 비교한다. 등록된 근거와 미확인 사항을 구분하고 누락된 시험/승인 근거는 확인 요청으로 남긴다. 미래 품질 승인 완료를 단정하지 않는다.",
+    "finance": "구매·운송·시험·보관·예상 폐기 총비용 차이와 예산·지급일별 현금 한도를 비교한다. 분할입고를 분할지급으로 추정하지 않는다. 지급 분산·현금 개선 주장은 등록 지급 일정과 금액이 실제로 뒷받침할 때만 하고, 없으면 지급 조건 확인을 요청한다. 구매/품질 의견을 반복하지 않는다.",
+    "admin": "모든 회차의 독립 검토를 통합해 최적 적격안과 비교 이유를 제시한다. 역할별 핵심 근거·트레이드오프·남은 조건을 연결하되 다수 동의를 사실 증명으로 삼지 않는다. 근거 부족·이견을 보존하고 계산 순위나 특정 공급안을 자동 추종하지 않는다.",
 }
 
 
@@ -75,8 +75,9 @@ def check_turn(turn, role, strategy_id, version, allowed, candidates, message_id
     errors = []
     if (turn["role"], turn["strategy_id"], turn["version"]) != (role, strategy_id, version):
         errors.append("role/strategy_id/version must match assigned context")
-    if not set(turn["evidence_refs"]).issubset(allowed):
-        errors.append("Unknown evidence_refs")
+    unknown = sorted(set(turn["evidence_refs"]) - allowed)
+    if unknown:
+        errors.append("Unknown evidence_refs: " + json.dumps(unknown, ensure_ascii=False))
     selected = turn["proposal"]["candidate_ids"]
     if not selected and role != "admin" and candidates:
         errors.append("Select at least one registered candidate")
@@ -90,7 +91,7 @@ def check_turn(turn, role, strategy_id, version, allowed, candidates, message_id
         expected = candidate.get("quantity") if impact["metric"] == "quantity" else candidate["costs"].get(impact["metric"])
         try:
             if Decimal(impact["value"]) != Decimal(str(expected)):
-                errors.append(f"Contradictory calculated metric {impact['metric']}")
+                errors.append(f"Contradictory calculated metric {impact['metric']} for candidate {impact['candidate_id']}: received {impact['value']}, expected {expected}. quantity is ordered units; all cost metrics including disposal are monetary amounts, not discarded units.")
         except Exception:
             errors.append("Impact value must be an exact calculated decimal")
     # Numeric claims are carried exclusively by verified structured metrics, never free prose.
@@ -108,12 +109,17 @@ def check_turn(turn, role, strategy_id, version, allowed, candidates, message_id
     for item in recommendations:
         if item["candidate_id"] not in feasible:
             errors.append("Recommendation violates deterministic constraints")
-        if not item["evidence_refs"] or not set(item["evidence_refs"]).issubset(allowed):
+        if not item["evidence_refs"]:
             errors.append("Recommendation needs existing evidence references")
-        if not item["message_refs"] or not set(item["message_refs"]).issubset(message_ids):
-            errors.append("Recommendation needs actual department message IDs")
-        if not item["change_refs"] or not set(item["change_refs"]).issubset(change_ids):
-            errors.append("Recommendation needs actual strategy version IDs")
+        unknown = sorted(set(item["evidence_refs"]) - allowed)
+        if unknown:
+            errors.append("Unknown recommendation evidence_refs: " + json.dumps(unknown, ensure_ascii=False))
+        unknown = sorted(set(item["message_refs"]) - message_ids)
+        if not item["message_refs"] or unknown:
+            errors.append("Recommendation needs actual department message IDs; unknown: " + json.dumps(unknown, ensure_ascii=False))
+        unknown = sorted(set(item["change_refs"]) - change_ids)
+        if not item["change_refs"] or unknown:
+            errors.append("Recommendation needs actual strategy version IDs; unknown: " + json.dumps(unknown, ensure_ascii=False))
         prose.extend([item["claim"], *item["remaining_risks"]])
     scrubbed = []
     for text in prose:
@@ -138,16 +144,59 @@ async def role_call(run_id, role, strategy_id, version, context, allowed, candid
         "Distinguish calculation checks, department judgments, Admin recommendations and the human's final selection/approval. "
         "Known product and record identifiers such as IL-7 or PROD-01 are permitted in prose. "
         "Put numeric quantity/cost assertions exclusively in impacts with an exact calculated metric value. "
-        "All four reviewers independently assess the same registered plans in parallel, including the purchasing AI. "
-        "A later round must consider every completed opinion from all earlier rounds, not just its own department. "
+        "For impacts, copy exact metric/value pairs from impact_contract for that candidate; never calculate a new value or substitute a different unit. "
+        "quantity means ordered quantity, not projected stock or waste. disposal means disposal COST, never discarded vial count. "
+        "If a finding has no supported metric, leave it qualitative with evidence_refs rather than forcing it into impacts. "
+        "All four reviewers independently compare the registered alternatives in parallel, including purchasing. "
+        "For non-admin reviewers in the first round there are NO peer opinions: never claim to accept, endorse or respond to another AI's proposal. "
+        "position=accept means your own assessment of the selected plans, not peer agreement. "
+        "In later rounds cite only actual supplied previous_messages; explain whether earlier evidence changes your assessment. "
+        "Do not manufacture disagreement: reviewers may select the same plan for different role-specific reasons. "
+        "Write proposal.summary as your own role-specific conclusion or information-needed decision. "
+        "Write reasons as concise comparative findings: identify the alternatives and explain role-specific advantages AND tradeoffs. "
+        "If only one plan exists, compare against demand/constraints and say no alternative is registered; never invent an alternative. "
+        "Write change_requests as actionable unresolved conditions or requested changes; [] only when nothing remains to verify. "
+        "Use needs_information when missing decision-critical evidence prevents a judgment; do not invent evidence to fill gaps. "
+        "State schedule feasibility conditionally: under the registered supply, QC/QA and capacity assumptions, not a guaranteed delivery. "
+        "Split receipts do NOT prove split payments. Claims of staggered payment or improved cash flow require actual payment dates/amounts. "
+        "Attribute expiry and quality evidence to the exact Lot: a short-lived held Lot is not the approved long-lived usable Lot. "
+        "Separate registered assumptions/forecasts from actually received CoA, temperature records and release results; do not imply documents are verified merely because a plan projects them. "
+        "Do not repeat generic human-approval and future-quality disclaimers in every reason; these are common UI notices. "
+        "Keep only role-specific consequential conditions in the review; Admin summarizes shared residual risks once. "
+        "Use concise Korean summaries, not hidden reasoning. Never omit a material risk for brevity. "
+        "reference_contract lists the exact permitted IDs by field. Copy IDs verbatim, never use a name, code, URL, array index or JSON path as an ID. "
+        "An evidence_refs value must be in evidence_ids; message_refs in message_ids; change_refs in strategy_ids. "
+        "Use [] where no evidence exists and explicitly request the missing evidence; never fabricate a citation. "
         "All fields are required. Non-admin recommendations must be []. Admin must recommend the best eligible proposal first "
         "and may include up to two distinct alternatives; exactly one if only one is eligible; [] if none. "
         "Do not inherit the candidate calculation rank as a recommendation order. Synthesize all review rounds and explain the chosen order. "
-        "Budget approval may remain explicitly required; cash infeasibility is disqualifying. No AI output authorizes an order; human approval remains required. "
+        "Budget excess requires additional human budget approval; it does NOT by itself make a candidate ineligible. "
+        "Eligibility uses hard_constraints_passed AND target_delivery_met AND cash_feasible; distinguish this from within-budget preference. "
+        "Do not claim a plan is the only eligible option unless every other candidate fails those eligibility checks. "
+        "Admin must recheck reviewer claims against the snapshot/calculation, not copy unsupported peer claims. "
+        "No AI output authorizes an order; human approval remains required. "
         "Admin rationale evidence_refs/message_refs/change_refs must reference actual provided IDs. Preserve unresolved objections and unconfirmed supply risk."
     )
-    messages = [{"role": "system", "content": system}, {"role": "user", "content": json.dumps({"assigned_role": role, "strategy_id": strategy_id, "version": version, **context}, ensure_ascii=False)}]
+    reference_contract = {
+        "evidence_ids": sorted(allowed),
+        "candidate_ids": sorted(candidates),
+        "message_ids": sorted(message_ids),
+        "strategy_ids": sorted(change_ids),
+    }
+    impact_contract = {
+        candidate_id: {"quantity": candidate.get("quantity"), **{
+            metric: value for metric, value in candidate.get("costs", {}).items()
+            if metric in {"purchase", "transport", "storage", "testing", "disposal", "subtotal", "total"}
+        }}
+        for candidate_id, candidate in candidates.items()
+    }
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": json.dumps({
+        **context, "assigned_role": role, "strategy_id": strategy_id, "version": version,
+        "reference_contract": reference_contract,
+        "impact_contract": impact_contract,
+    }, ensure_ascii=False)}]
     for attempt in range(2):
+        turn = None
         try:
             turn = await generate_json(role, messages, DepartmentTurn.model_json_schema())
             errors = check_turn(turn, role, strategy_id, version, allowed, candidates, message_ids, change_ids, known_identifiers(context))
@@ -162,7 +211,14 @@ async def role_call(run_id, role, strategy_id, version, context, allowed, candid
                 if isinstance(exc, ProviderError):
                     raise
                 raise ProviderError("invalid_output", str(exc), role) from None
-            messages.append({"role": "user", "content": "Correct the JSON once. Validation errors: " + str(exc)})
+            if turn is not None:
+                messages.append({"role": "assistant", "content": json.dumps(turn, ensure_ascii=False)})
+            messages.append({"role": "user", "content": json.dumps({
+                "task": "Correct the rejected response once. Keep grounded findings, use only genuinely supporting reference_contract IDs and exact impact_contract metrics with matching units. Remove unsupported claims instead of inventing evidence or numbers. Return the full schema.",
+                "validation_errors": str(exc),
+                "reference_contract": reference_contract,
+                "impact_contract": impact_contract,
+            }, ensure_ascii=False)})
     raise ProviderError("invalid_output", "Correction failed", role)
 
 

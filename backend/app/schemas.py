@@ -8,14 +8,14 @@ class StrictModel(BaseModel):
 
 class Impact(StrictModel):
     candidate_id: str
-    metric: Literal["quantity", "purchase", "transport", "storage", "testing", "disposal", "subtotal", "total"]
-    value: str
-    evidence_ref: str
+    metric: Literal["quantity", "purchase", "transport", "storage", "testing", "disposal", "subtotal", "total"] = Field(description="quantity는 주문 수량, 나머지는 금액이다. disposal은 예상 폐기 비용이지 폐기 수량이 아니다.")
+    value: str = Field(description="해당 candidate_id의 impact_contract에서 metric에 대응하는 계산값을 단위 변환·재계산 없이 그대로 복사한다.")
+    evidence_ref: str = Field(description="이 수치의 근거인 reference_contract.evidence_ids의 실제 ID.")
 
 
 class Proposal(StrictModel):
     candidate_ids: list[str]
-    summary: str
+    summary: str = Field(description="자기 역할의 독립 검토 결론 또는 판단 보류. 첫 병렬 회차에서 다른 AI 제안을 수용했다고 표현하지 않는다.")
 
 
 class Rationale(StrictModel):
@@ -33,9 +33,9 @@ class DepartmentTurn(StrictModel):
     version: int
     proposal: Proposal
     impacts: list[Impact]
-    reasons: list[str]
-    evidence_refs: list[str]
-    change_requests: list[str]
+    reasons: list[str] = Field(description="역할 관점에서 등록 대안 간 장단점·트레이드오프를 비교한 간결한 근거. 공통 안전 안내 반복 금지. 숫자 주장은 impacts에 기록한다.")
+    evidence_refs: list[str] = Field(description="reference_contract.evidence_ids에서 복사한 실제 근거 ID만 사용. 품목 코드·이름·URL·JSON 경로는 ID가 아니다.")
+    change_requests: list[str] = Field(description="남은 의사결정 조건·위험과 구체적인 확인/수정 요청. 근거 없는 일정·품질·지급 조건은 확인 요청으로 남긴다.")
     position: Literal["accept", "object", "needs_information"]
     recommendations: list[Rationale]
 

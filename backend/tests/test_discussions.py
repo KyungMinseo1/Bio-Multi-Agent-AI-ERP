@@ -220,3 +220,63 @@ def test_admin_can_choose_single_best_eligible_plan_but_not_ineligible_plan():
     assert check_turn(value, "admin", "strategy", 1, {"lot"}, candidates, {"message"}, {"strategy"}, identifiers) == []
     candidates["candidate"] = {**eligible, "validation": {**eligible["validation"], "cash_feasible": False}}
     assert "Recommendation violates deterministic constraints" in check_turn(value, "admin", "strategy", 1, {"lot"}, candidates, {"message"}, {"strategy"}, identifiers)
+
+
+@pytest.mark.parametrize("repair", [True, False])
+def test_quality_reference_correction_preserves_only_grounded_results(client, monkeypatch, repair):
+    configure_review_provider(monkeypatch, 1)
+    queued = create_review(client)
+    eligible = next(candidate["id"] for candidate in queued["calculation"]["candidates"]
+                    if candidate["validation"]["hard_constraints_passed"]
+                    and candidate["validation"]["target_delivery_met"]
+                    and candidate["validation"].get("cash_feasible", True))
+    quality_calls = 0
+    admin_called = False
+
+    async def generate(role, messages, schema):
+        nonlocal quality_calls, admin_called
+        context = json.loads(messages[1]["content"])
+        if role == "admin":
+            admin_called = True
+            return review_turn(role, context, [eligible])
+        value = review_turn(role, context)
+        if role == "quality":
+            quality_calls += 1
+            if quality_calls == 1 or not repair:
+                value["evidence_refs"] = ["invented-quality-document"]
+            else:
+                # A repair needs the rejected output and exact allowed IDs, not just an opaque error.
+                rejected = json.loads(messages[-2]["content"])
+                correction = json.loads(messages[-1]["content"])
+                assert rejected["evidence_refs"] == ["invented-quality-document"]
+                assert "invented-quality-document" in correction["validation_errors"]
+                assert value["evidence_refs"][0] in correction["reference_contract"]["evidence_ids"]
+        return value
+
+    monkeypatch.setattr(discussions, "generate_json", generate)
+    asyncio.run(discussions.run_discussion(queued["id"]))
+    result = client.get(f"/api/v1/discussions/{queued['id']}").json()
+    assert quality_calls == 2
+    assert admin_called is repair
+    assert result["status"] == ("awaiting_review" if repair else "failed")
+    quality = [message for message in result["messages"] if message["role"] == "quality"]
+    if repair:
+        assert len(result["recommendations"]) == 1
+        assert len(quality) == 1
+        assert set(quality[0]["evidence_refs"]).issubset(discussions.all_ids(queued["snapshot"]))
+    else:
+        assert quality == []
+        assert result["recommendations"] == []
+        assert result["error"]["role"] == "quality"
+        assert "invented-quality-document" in result["error"]["message"]
+
+
+def test_disposal_metric_is_cost_not_discarded_quantity():
+    value = turn()
+    candidates = {"candidate": {"quantity": "20", "costs": {"disposal": "16000"},
+                                "validation": {"hard_constraints_passed": True, "target_delivery_met": True, "cash_feasible": True}}}
+    value["impacts"] = [{"candidate_id": "candidate", "metric": "disposal", "value": "8", "evidence_ref": "lot"}]
+    errors = check_turn(value, "admin", "strategy", 1, {"lot"}, candidates, {"message"}, {"strategy"}, {"IL-7", "PROD-01"})
+    assert any("received 8, expected 16000" in error and "monetary amounts" in error for error in errors)
+    value["impacts"][0]["value"] = "16000"
+    assert check_turn(value, "admin", "strategy", 1, {"lot"}, candidates, {"message"}, {"strategy"}, {"IL-7", "PROD-01"}) == []

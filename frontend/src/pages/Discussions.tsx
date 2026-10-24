@@ -81,10 +81,10 @@ export default function Discussions() {
       </Panel>
       <Panel title="AI별 검토 의견과 남은 이견" subtitle="의견은 계산 검증 근거와 구분합니다. 남은 반대·추가 확인 요청을 숨기지 않습니다.">
         {messages.length ? <div className="department-summary">{latestMessages.map(message => <article key={text(message.id)}>
-          <div className="department-heading"><span className="department-avatar">{label(message.role).slice(0, 2)}</span><div><strong>{label(message.role)}</strong><small>{isHistorical ? `전략 v${text(message.version)}` : message.role === 'admin' ? '전체 라운드 통합 판단' : `병렬 검토 ${text(message.version)} / ${reviewRounds}라운드`}</small></div><Badge value={message.position}/></div>
+          <div className="department-heading"><span className="department-avatar">{label(message.role).slice(0, 2)}</span><div><strong>{label(message.role)}</strong><small>{isHistorical ? `전략 v${text(message.version)}` : message.role === 'admin' ? '전체 라운드 통합 판단' : `병렬 검토 ${text(message.version)} / ${reviewRounds}라운드`}</small></div><Badge value={message.position}>{!isHistorical && message.position === 'accept' ? '검토상 수용' : label(message.position)}</Badge></div>
           <h3>{typeof message.proposal === 'string' ? message.proposal : text(record(message.proposal).summary) || '전략 검토 의견'}</h3>
           {message.reasons != null && <div className="department-reasons">{Array.isArray(message.reasons) ? message.reasons.map((reason, index) => <p key={index}>{typeof reason === 'string' ? reason : display(record(reason).message || reason)}</p>) : <p>{display(message.reasons)}</p>}</div>}
-          <details><summary>영향 · 변경 요청</summary><h4>영향</h4><pre>{JSON.stringify(message.impacts, null, 2)}</pre><h4>변경 요청</h4><pre>{JSON.stringify(message.change_requests, null, 2)}</pre></details><Evidence refs={message.evidence_refs} extra={snapshotEvidence}/>
+          <details><summary>수치 영향 · 남은 조건과 요청 조치</summary><h4>검증된 수치 영향</h4><pre>{JSON.stringify(message.impacts, null, 2)}</pre><h4>남은 조건 · 확인/수정 요청</h4>{Array.isArray(message.change_requests) ? message.change_requests.map((request, index) => <p key={index}>{display(request)}</p>) : <pre>{JSON.stringify(message.change_requests, null, 2)}</pre>}</details><Evidence refs={message.evidence_refs} extra={snapshotEvidence}/>
         </article>)}</div> : <Empty title="아직 저장된 역할 의견이 없습니다"/>}
       </Panel>
       <Panel title={isHistorical ? '전략 버전과 변경 이력' : '라운드별 검토 전략과 변경 이력'} subtitle="원본 제안은 덮어쓰지 않고 버전별로 보존합니다.">
