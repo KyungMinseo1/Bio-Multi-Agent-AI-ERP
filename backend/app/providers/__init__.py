@@ -7,7 +7,7 @@ from jsonschema import Draft202012Validator
 from ..config import setting, role_mapping
 from ..schemas import DepartmentTurn
 
-NAMES = ("openai", "gemini", "openrouter", "vllm")
+NAMES = ("openai", "gemini", "openrouter", "vllm", "openai_compatible")
 _clients = {}
 
 
@@ -38,13 +38,13 @@ def configuration(role=None):
             raise ValueError()
     except (ValueError, TypeError):
         timeout, error = 60, "Timeout must be a finite positive number"
-    configured = not error and name in NAMES and isinstance(model, str) and bool(model) and (isinstance(base, str) and bool(base) if name == "vllm" else bool(key))
+    configured = not error and name in NAMES and isinstance(model, str) and bool(model) and (isinstance(base, str) and bool(base) if name in {"vllm", "openai_compatible"} else bool(key))
     return {"provider": name, "model": model, "configured": bool(configured), "base_url": base, "timeout": timeout, "configuration_error": error}
 
 
 def public_settings():
     roles = {r: {key: value for key, value in configuration(r).items() if key != "base_url"} for r in ("purchasing", "inventory_logistics", "production_management", "production", "qc", "qa", "finance", "admin")}
-    return {"provider": setting("LLM_PROVIDER"), "configured": all(value["configured"] for value in roles.values()), "providers": {name: {"configured": bool(setting(f"{name.upper()}_MODEL")) and bool(setting(f"{name.upper()}_BASE_URL")) if name == "vllm" else bool(setting(f"{name.upper()}_MODEL") and setting(f"{name.upper()}_API_KEY")), "model": setting(f"{name.upper()}_MODEL")} for name in NAMES}, "roles": roles}
+    return {"provider": setting("LLM_PROVIDER"), "configured": all(value["configured"] for value in roles.values()), "providers": {name: {"configured": bool(setting(f"{name.upper()}_MODEL")) and bool(setting(f"{name.upper()}_BASE_URL")) if name in {"vllm", "openai_compatible"} else bool(setting(f"{name.upper()}_MODEL") and setting(f"{name.upper()}_API_KEY")), "model": setting(f"{name.upper()}_MODEL")} for name in NAMES}, "roles": roles}
 
 
 def require_configuration():
@@ -74,9 +74,9 @@ async def generate_json(role: str, messages: list[dict], schema: dict) -> dict:
             if name == "gemini":
                 _clients[cache_key] = genai.Client(api_key=setting("GEMINI_API_KEY"), http_options=types.HttpOptions(timeout=int(timeout * 1000)))
             else:
-                base = {"openai": "https://api.openai.com/v1", "openrouter": "https://openrouter.ai/api/v1", "vllm": config["base_url"]}[name]
-                if name == "vllm" and not base.rstrip("/").endswith("/v1"):
-                    raise ProviderError("configuration_error", "VLLM_BASE_URL must end in /v1", role)
+                base = config["base_url"] or {"openai": "https://api.openai.com/v1", "openrouter": "https://openrouter.ai/api/v1"}.get(name)
+                if name in {"vllm", "openai_compatible"} and not base.rstrip("/").endswith("/v1"):
+                    raise ProviderError("configuration_error", f"{name.upper()}_BASE_URL must end in /v1", role)
                 _clients[cache_key] = AsyncOpenAI(api_key=setting(f"{name.upper()}_API_KEY") or "not-required", base_url=base, timeout=timeout, max_retries=0)
         client = _clients[cache_key]
         async with asyncio.timeout(timeout):

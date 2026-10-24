@@ -48,11 +48,11 @@ export default function Settings({ settings }: { settings: Row }) {
         }}><RefreshCw size={13} className={testing ? 'spin' : ''}/>{testing ? '실제 호출 중…' : '실제 연결 확인'}</button>
       </div>
     }>
-      <div className="provider-grid">{['openai', 'gemini', 'openrouter', 'vllm'].map(name => {
+      <div className="provider-grid">{['openai', 'gemini', 'openrouter', 'vllm', 'openai_compatible'].map(name => {
         const provider = record(providers[name]);
         return <article className={`provider-card ${llm.provider === name ? 'selected' : ''}`} key={name}>
-          <div><span className="provider-logo">{name === 'openai' ? 'O' : name === 'gemini' ? 'G' : name === 'openrouter' ? '↗' : 'V'}</span><Badge value={provider.configured ? 'completed' : 'pending'}>{provider.configured ? '구성됨' : '미설정'}</Badge></div>
-          <h3>{({ openai: 'OpenAI', gemini: 'Google Gemini', openrouter: 'OpenRouter', vllm: 'vLLM' } as Record<string, string>)[name]}</h3>
+          <div><span className="provider-logo">{name === 'openai' ? 'O' : name === 'gemini' ? 'G' : name === 'openrouter' ? '↗' : name === 'vllm' ? 'V' : 'API'}</span><Badge value={provider.configured ? 'completed' : 'pending'}>{provider.configured ? '구성됨' : '미설정'}</Badge></div>
+          <h3>{({ openai: 'OpenAI Responses', gemini: 'Google Gemini', openrouter: 'OpenRouter', vllm: 'vLLM', openai_compatible: 'OpenAI 호환 API' } as Record<string, string>)[name]}</h3>
           <span className="provider-model">{text(provider.model) || '모델 ID 필요'}</span><small>{llm.provider === name ? '현재 선택된 공급자' : '자동 공급자 전환 없음'}</small>
         </article>;
       })}</div>
@@ -61,11 +61,13 @@ export default function Settings({ settings }: { settings: Row }) {
         <summary>서버 환경변수 설정 안내</summary>
         <div className="environment-grid">
           <div><strong>공통</strong><code>LLM_PROVIDER</code><code>LLM_TIMEOUT_SECONDS</code></div>
-          <div><strong>OpenAI</strong><code>OPENAI_API_KEY</code><code>OPENAI_MODEL</code></div>
+          <div><strong>OpenAI Responses</strong><code>OPENAI_API_KEY</code><code>OPENAI_MODEL</code><code>OPENAI_BASE_URL (선택)</code></div>
           <div><strong>Gemini</strong><code>GEMINI_API_KEY</code><code>GEMINI_MODEL</code></div>
           <div><strong>OpenRouter</strong><code>OPENROUTER_API_KEY</code><code>OPENROUTER_MODEL</code></div>
           <div><strong>vLLM</strong><code>VLLM_BASE_URL</code><code>VLLM_MODEL</code><code>VLLM_API_KEY (선택)</code></div>
+          <div><strong>OpenAI 호환 Chat Completions</strong><code>LLM_PROVIDER=openai_compatible</code><code>OPENAI_COMPATIBLE_BASE_URL</code><code>OPENAI_COMPATIBLE_MODEL</code><code>OPENAI_COMPATIBLE_API_KEY (선택)</code></div>
         </div>
+        <p>vLLM·호환 API는 접근 가능한 /v1 기본 URL과 서버에서 제공하는 정확한 모델 ID가 모두 필요합니다. URL만으로는 연결할 수 없으며 strict JSON Schema 구조화 출력을 지원해야 합니다. vLLM은 별도 서버에서 실행하고 GPU 병렬화는 서버의 <code>vllm serve … --tensor-parallel-size …</code>로 설정합니다.</p>
       </details>
       {Object.keys(roles).length > 0 && <div className="role-models"><h3>역할별 모델 매핑</h3>{Object.entries(roles).map(([role, config]) => <div key={role}><strong>{label(role)}</strong><code>{typeof config === 'string' ? config : `${text(record(config).provider)} / ${text(record(config).model)}`}</code></div>)}</div>}
     </Panel>

@@ -1,20 +1,21 @@
 import { CheckCircle2, CircleAlert, Truck } from 'lucide-react';
 import { date, display, label, money, quantity, record, rows, text, type Row } from './api';
 import { Badge, Evidence, KeyValue, Timeline } from './components';
-export default function CandidateComparison({ candidates, compact = false, action, evidence }: { candidates: Row[]; compact?: boolean; action?: (candidate: Row) => React.ReactNode; evidence?: Row[] }) {
+export default function CandidateComparison({ candidates, compact = false, stage = 'calculation', action, evidence }: { candidates: Row[]; compact?: boolean; stage?: 'calculation' | 'recommendation'; action?: (candidate: Row) => React.ReactNode; evidence?: Row[] }) {
   if (!candidates.length) return <div className="empty"><Truck size={28}/><h3>계산 가능한 발주 대안이 없습니다</h3><p>부족 수요, 유효 견적, 공급업체 승인 및 필수 입력을 확인하세요.</p></div>;
   return <div className={`candidate-grid ${compact ? 'compact' : ''}`}>{candidates.map((candidate, index) => {
     const validation = record(candidate.validation); const costs = record(candidate.costs); const valid = validation.hard_constraints_passed === true; const reasons = rows(validation.reasons); const warnings = rows(validation.warnings);
-    return <article className={`candidate-card ${index === 0 && valid ? 'recommended' : ''}`} key={text(candidate.id)}>
-      <div className="candidate-top"><span className="candidate-number">{String(index + 1).padStart(2, '0')}</span><Badge value={!valid ? 'infeasible' : validation.requires_budget_approval ? 'requires_budget_approval' : 'feasible'}/></div>
+    return <article className={`candidate-card ${stage === 'recommendation' && index === 0 && valid ? 'recommended' : ''}`} key={text(candidate.id)}>
+      <div className="candidate-top"><span className="candidate-number">{String(index + 1).padStart(2, '0')}</span><Badge value={!valid ? 'infeasible' : validation.requires_budget_approval ? 'requires_budget_approval' : 'feasible'}>{!valid ? '계산상 제약 위반' : validation.requires_budget_approval ? '별도 예산 승인 필요' : '계산상 제약 통과'}</Badge></div>
       <h3>{text(candidate.name)}</h3>
+      <p className="projection-note">{stage === 'calculation' ? '협의 전 잠정 계산 · 적합성 판단과 AI 추천은 아직 아닙니다.' : '실제 AI 협의의 추천 · 담당자의 최종 선택과 승인이 필요합니다.'}</p>
       <p className="candidate-quantity">주문 수량 <strong>{quantity(candidate.quantity)}</strong></p>
       <div className="candidate-cost"><span>예상 총비용</span><strong>{money(costs.total)}</strong><small>구매 + 운송 + 보관 + 시험 + 예상 폐기</small></div>
       <div className="candidate-checks">
-        <div>{valid ? <CheckCircle2 size={16}/> : <CircleAlert size={16}/>}필수조건 {valid ? '충족' : '미충족'}</div>
-        <div>{validation.target_delivery_met ? <CheckCircle2 size={16}/> : <CircleAlert size={16}/>}목표 투입일 {validation.target_delivery_met ? '충족 예상' : '미충족 / 확인 필요'}</div>
-        <div><Truck size={16}/>{label(validation.supply_evidence_level)}</div>
-        <div>{validation.cash_feasible ? <CheckCircle2 size={16}/> : <CircleAlert size={16}/>}지급일 현금 한도 {validation.cash_feasible ? '충족' : '미충족 / 확인 필요'}</div>
+        <div>{valid ? <CheckCircle2 size={16}/> : <CircleAlert size={16}/>}등록 조건 계산 {valid ? '통과' : '위반 / 확인 필요'}</div>
+        <div>{validation.target_delivery_met ? <CheckCircle2 size={16}/> : <CircleAlert size={16}/>}목표 투입일 {validation.target_delivery_met ? '대응 가능 예상' : '대응 어려움 / 확인 필요'}</div>
+        <div><Truck size={16}/>공급 근거: {label(validation.supply_evidence_level)}</div>
+        <div>{validation.cash_feasible ? <CheckCircle2 size={16}/> : <CircleAlert size={16}/>}지급일 현금 한도 {validation.cash_feasible ? '계산상 한도 내' : '초과 / 확인 필요'}</div>
       </div>
       <div className="candidate-residuals">
         <KeyValue label="최종 투입 후 예상 가용 잔량" value={quantity(candidate.remaining_quantity)}/>
@@ -28,16 +29,17 @@ export default function CandidateComparison({ candidates, compact = false, actio
         </div>
         <div className="delivery-list">{rows(candidate.deliveries).map((delivery, i) => <div key={text(delivery.id) || i}>
           <strong>{i + 1}회차 · {quantity(delivery.quantity)}</strong>
-          <span>입고 {date(delivery.arrival_date)}</span>
+          <span>입고 예정 {date(delivery.arrival_date)}</span>
           <span>QC 시작 예상 {date(delivery.qc_start_date)}</span>
-          <span>사용 가능 예상 {date(delivery.available_date)}</span>
+          <span>QC/QA 후 사용 가능 예상 {date(delivery.available_date)}</span>
           <span>유효일 {date(delivery.expiry_date)}</span>
           <span>지급일 {date(delivery.payment_date)}</span>
-          <Badge value={delivery.confirmed ? 'confirmed' : 'unconfirmed'}/>
+          <Badge value={delivery.confirmed ? 'confirmed' : 'unconfirmed'}>{delivery.confirmed ? '공급 확약 근거 있음' : '공급 미확약'}</Badge>
         </div>)}</div>
       </details>
+      <p className="projection-note">견적·일정·시험 슬롯 등 등록 조건에 따른 추정입니다. 공급 확약은 입고·QC 합격·QA 사용 승인 완료를 뜻하지 않습니다.</p>
       {rows(candidate.timeline).length > 0 && <details className="cost-details">
-        <summary>이 안의 날짜별 가용 재고</summary>
+        <summary>이 안의 날짜별 예상 가용 재고</summary>
         <p className="projection-note">미확약 입고는 제외합니다. 미래 QC/QA 완료는 실제 승인 전 예측치입니다.</p>
         <Timeline items={candidate.timeline} evidence={evidence}/>
       </details>}

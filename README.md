@@ -1,5 +1,6 @@
 # Bio-Multi-Agent-AI-ERP
 
+<<<<<<< HEAD
 합성 바이오 원료 데이터로 발주 의사결정을 시연하는 독립 웹 ERP. 한국어 화면에서 시나리오 선택 → ERP 입력 → 수치 검증 → 실제 LLM 부서 협의 → 사람 승인 → **내부 발주 등록**을 수행한다. 공급업체에 주문을 전송하지 않으며, 발주 승인은 QC/QA 사용 승인이 아니다.
 
 ## 실행
@@ -47,16 +48,21 @@ register_scenario("scenario_2", "화면에 보일 이름", "배경과 검증 목
 
 ## LLM 설정
 
-선택한 공급자의 키와 **모델 ID를 모두** `.env`에 설정한다. 모델 기본값이나 자동 공급자 전환, 가짜 토론 응답은 없다.
+선택한 공급자의 **정확한 모델 ID와 연결 설정**을 `.env`에 설정한다. 모델 기본값이나 자동 공급자 전환, 가짜 토론 응답은 없다. API 키는 OpenAI·Gemini·OpenRouter에서 필수이며 인증 없는 자체 호스팅 서버에서는 선택 사항이다.
 
-- `LLM_PROVIDER=openai`: `OPENAI_API_KEY`, `OPENAI_MODEL`
+- `LLM_PROVIDER=openai`: `OPENAI_API_KEY`, `OPENAI_MODEL` — OpenAI **Responses API**를 사용한다. `OPENAI_BASE_URL`은 선택적 endpoint 재정의이며 Chat Completions 전용 서버용 설정이 아니다.
 - `LLM_PROVIDER=gemini`: `GEMINI_API_KEY`, `GEMINI_MODEL`
-- `LLM_PROVIDER=openrouter`: `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`
-- `LLM_PROVIDER=vllm`: `VLLM_BASE_URL`(`/v1` 포함), `VLLM_MODEL`, 필요한 경우 `VLLM_API_KEY`
+- `LLM_PROVIDER=openrouter`: `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, 선택적 `OPENROUTER_BASE_URL`
+- `LLM_PROVIDER=vllm`: `VLLM_BASE_URL`(`/v1`로 끝나는 주소), `VLLM_MODEL`, 필요한 경우 `VLLM_API_KEY` — 기존과 동일하게 외부 서버의 Chat Completions API를 사용한다.
+- `LLM_PROVIDER=openai_compatible`: `OPENAI_COMPATIBLE_BASE_URL`(`/v1`로 끝나는 주소), `OPENAI_COMPATIBLE_MODEL`, 필요한 경우 `OPENAI_COMPATIBLE_API_KEY` — 일반 OpenAI 호환 서버의 `/v1/chat/completions`를 사용한다.
+
+vLLM 모델은 이 ERP 프로세스 안에서 로드하지 않는다. 별도 추론 서버에서 예를 들어 `vllm serve <model-id> --host 0.0.0.0 --port 8000 --tensor-parallel-size 2`를 실행한다. `--tensor-parallel-size`는 추론 서버의 GPU 구성 옵션이며 ERP 환경변수가 아니다. API와 worker가 모두 접근할 수 있는 주소(예: `http://inference-host:8000/v1`)와 해당 서버가 제공하는 모델 ID를 설정한다. 컨테이너의 `localhost`는 컨테이너 자체를 가리키므로 외부 추론 서버 주소로 바꾼다. **URL만으로는 부족하며 모델 ID도 필수**다. vLLM 서버를 일반 호환 공급자 또는 기존 `vllm` 공급자로 연결할 수 있다.
+
+Chat Completions 공급자(vLLM·일반 호환 API·OpenRouter)는 `response_format.type=json_schema`, `json_schema.strict=true`를 지원해야 한다. 단순 텍스트 생성이나 JSON 모드만 지원하는 endpoint는 충분하지 않다. 반환 결과는 서버에서 JSON Schema와 업무 스키마로 다시 검증하며, 지원하지 않거나 형식이 틀리면 실패로 남긴다. 구조화 출력을 제거하거나 합성 응답으로 우회하지 않는다.
 
 `LLM_ROLE_MAPPING`은 역할별 공급자/모델 JSON 설정이다. 키는 환경변수에만 두며 화면에는 설정 여부만 표시한다. 토론 실행에는 API 외에 worker가 필요하다. 미설정·인증 실패·타임아웃·잘못된 구조화 응답은 실패로 표시한다.
 
-예: `LLM_ROLE_MAPPING={"qc":{"provider":"gemini","model":"사용할-모델-ID"},"finance":{"provider":"openai","model":"사용할-모델-ID"}}`. 나머지 역할은 `LLM_PROVIDER`와 해당 공급자의 모델 설정을 사용한다. 역할 키는 `purchasing`, `inventory_logistics`, `production_management`, `production`, `qc`, `qa`, `finance`, `admin`이다.
+예: `LLM_ROLE_MAPPING={"qc":{"provider":"gemini","model":"사용할-모델-ID"},"finance":{"provider":"openai","model":"사용할-모델-ID"}}`. 나머지 역할은 `LLM_PROVIDER`와 해당 공급자의 모델 설정을 사용한다. 각 역할에 `base_url`, `timeout`을 지정하면 해당 공급자의 기본 URL·공통 제한 시간을 재정의한다(예: `{"purchasing":{"provider":"openai_compatible","model":"서버의-모델-ID","base_url":"http://inference-host:8000/v1"}}`). API 키는 해당 공급자의 환경변수에서만 읽는다. 역할 키는 `purchasing`, `inventory_logistics`, `production_management`, `production`, `qc`, `qa`, `finance`, `admin`이다.
 
 ## 검증과 개발
 
@@ -112,3 +118,6 @@ npm run build
 - B안 구매+운송은 12,300,000원이며 보관·시험·폐기를 더한 총비용과 구별한다.
 
 요구사항과 배경: [구현 계획](docs/PLAN.md), [IL-7 시나리오](docs/scenario_1.md).
+=======
+-seohyeon
+>>>>>>> 9d025914f98bbb0c4957aa6ad2f22bcd7e52e5b6
