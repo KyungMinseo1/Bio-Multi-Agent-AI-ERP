@@ -73,7 +73,7 @@ def test_connect_verifies_tls_auth_without_sending_and_saves_privately(client, m
     assert response.json()["status"] == "connected"
     assert "abcdefghijklmnop" not in response.text
     assert events == ["ehlo", "tls", "ehlo", "auth"]
-    if os.name != 'nt':  # Windows chmod does not expose POSIX owner/group permissions.
+    if os.name != 'nt':  # Windows chmod does not expose POSIX owner/group bits.
         assert stat.S_IMODE(mail_config.stat().st_mode) == 0o600
     assert mailer.mail_configuration().password == "abcdefghijklmnop"
     monkeypatch.setenv("BIOFLOW_SMTP_USERNAME", "other@example.test")

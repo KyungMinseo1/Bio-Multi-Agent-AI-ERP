@@ -1,191 +1,158 @@
-# BioFlow 1차 승인 → 견적 요청 이메일
+# 업체 이메일 데이터 · 팀원 메일 기능 통합
 
-## 확인한 기존 구조
+통합 기준일: 2026-10-25. 실제 이메일 발송 및 원격 push는 수행하지 않았다.
 
-- 작업 디렉터리와 상위 디렉터리에서 적용할 `AGENTS.md`를 찾지 못했다.
-- 1차 공급 확인 승인은 `src/workflow/engine.ts`, 서버 저장은 `services/workspace.py`의 기존 명령·버전 잠금·감사 기록을 사용한다. 최종 PO 승인은 별도 `registerPO` / 추천 승인 경로다.
-- 메일은 **MCP가 아닌 Python `smtplib` SMTP**다. 기존 `services/mailer.py`의 SSL/STARTTLS·발신 허용 목록·Gmail 인증·CSV 첨부를 재사용한다. 새 발송 시스템은 추가하지 않았다.
-- 변경 전 작성 화면은 `BIOFLOW_SMTP_DEFAULT_TO`를 모든 업체의 기본 수신자로 사용했고, 업체 선택을 바꿔도 주소와 본문을 다시 채우지 않았다. 이제 이 변수는 호환 설정 조회에만 남고 업체/테스트 수신자로 사용하지 않는다.
-- 소스의 발신자·수신자에 실제 팀원 개인 이메일 리터럴은 발견하지 못했다. 로컬 실행 파일에는 로컬 로그인용 예시 계정만 있으며, SMTP 발신·공통 수신·허용 테스트 주소는 설정되지 않았다. 비밀정보 값은 출력하지 않았다.
+## 보존과 통합 대상
 
-## 사용자 흐름
+- 최초 폴더에는 .git이 없었다. 원래 브랜치·커밋·미커밋 상태는 존재하지 않아 확인할 수 없었다. 로컬 main을 생성하거나 변경하지 않았다.
+- 소스 119개 파일을 비밀정보 검사 후 로컬 체크포인트 a3220cf에 보존했다. 보존 브랜치: checkpoint/pre-email-integration-20261024. .env, .runtime, DB, 가상환경, 빌드는 커밋하지 않았다. .env.example은 비밀정보 없는 템플릿으로 포함했다.
+- 현재 작업 브랜치: integration/supplier-email-joengwon.
+- git fetch origin으로 확인한 실제 원격 브랜치명은 Jeongwon이다. joengwon이라는 정확한 이름은 없었고, main 외에 해당 작업 브랜치만 있어 식별 가능한 대상이었다.
+- 통합 원격: https://github.com/KyungMinseo1/Bio-Multi-Agent-AI-ERP/tree/Jeongwon
+- 통합 커밋: ecd572c4664de9595bcda023a054b0337ce4f31a (문서). 핵심 기능 커밋: fadc22f (CSV 부족 계산·Gmail MCP 견적 흐름).
+- Git 이력이 없는 소스와 원격이므로 --allow-unrelated-histories --no-commit 병합으로 시작했다. add/add 충돌 23개는 팀원의 CSV/메일 구현을 기준으로 해소하고 업체 데이터·안전 검증·Windows UTF-8 수정은 재적용했다. 양쪽 이력은 merge commit의 부모로 보존한다.
+- 적용할 AGENTS.md는 로컬/상위 디렉터리 및 원격 파일 목록에서 발견하지 못했다.
 
-1. 통합 서버에 승인자 계정으로 연결한다. 로컬 시연은 기존 로컬 로그인 기능을 사용한다.
-2. 공급업체·견적 표의 편집에서 업체 ID별 **견적 담당자 이메일**을 설정한다. 새 시드 A/B/C는 서로 다른 `supplier-a@example.com` 형태의 예시다. 기존 저장 데이터의 누락 주소는 추정하지 않는다.
-3. 1차 검토의 **공급업체 확인 승인**을 누른다. ERP 저장과 서버 승인 명령이 성공한 경우에만 문의 탭과 이메일 작성 화면이 열린다. 저장 실패·409 충돌·보류는 작성 화면으로 진행하지 않는다. 승인 처리 중에는 중복 클릭과 모달 닫기를 막는다.
-4. 승인 명령은 승인 기록과 문의들을 한 트랜잭션으로 저장한다. 기존 문의가 있으면 ID를 유지한다. 승인 직후 SMTP 호출은 없다.
-5. 업체 선택 시 해당 업체 주소·본문·기존 초안을 불러온다. ERP 원료 코드·제품 코드·명칭·규격·단위·확보 목표량·생산 투입/희망 입고 일정·회신 기한과 단가/MOQ/분할/유효기간/품질 문서 확인 요청을 채운다. 제목·본문·허용 발신자를 수정할 수 있다. 업체 주소는 마스터에서 수정한다.
-6. **초안 저장**은 서버에 저장한다. 편집 내용은 브라우저에도 문의 ID별로 보존한다. 발송 전 확인 체크 후 현재 모드의 버튼을 누른다. 승인된 서버 버전과 다른 데이터는 발송할 수 없다.
-7. `sent`는 SMTP 서버 수락이다. 실제 도착·업체 회신·공급 확약은 별개이며, 발송만으로 공급 가능량이나 최종 PO를 생성하지 않는다.
+### 기존 변경과 이전 작업 구분
 
-연결되지 않은 Vite 단독 화면에서는 서버에 승인을 저장할 수 없으므로 승인 후 메일 단계도 진행하지 않는다. 로컬 초안과 서버 업무가 다르면 기존 통합 서버 화면에서 서버 업무를 불러와 충돌을 해결한다.
+원격 7f18141과 체크포인트를 파일 내용으로 비교하면 아래 25개 파일이 다르며, 지난 대화에서 제가 수정한 파일 목록과 일치한다. 나머지 94개 보존 파일은 해당 원격 기준과 같다. 단, 원래 Git 이력이 없어 같은 파일에 사용자가 추가로 수정했는지는 분리 확정할 수 없다. 그래서 파일 전체를 체크포인트로 먼저 보존했다. 보존 파일의 SHA-256 목록은 로컬 .runtime/integration-preservation/source-manifest.json에 있다.
 
-## 업체 데이터와 DB
+이전 광범위 구현은 체크포인트에서 확인할 수 있다. 현재 담당 범위에서는 이전 quoteMail.ts, 중복 초안 PUT API, 개인 초안용 0003_rfq_drafts와 해당 전용 테스트를 제거하고 팀원 기능으로 통일했다. 실제 로컬 DB는 0002_outbound_emails여서 제거한 개인 마이그레이션이 적용되지 않았음을 확인했다. 다른 환경에서 그 개인 마이그레이션을 이미 적용했다면 별도 DB 이관 검토가 필요하다.
 
-| 위치 | 필드 | 의미 |
-|---|---|---|
-| 기존 워크플로 `data.vendors[]` | `id`, `quoteEmail?: string` | 업체 ID와 견적 담당자 이메일 |
-| ERP 공급업체 JSON 투영 | `id`, `code`, `quote_email` | 기존 `SUP-A` 등의 ID 매핑을 유지 |
-| 일반 ERP 공급업체 폼 | `quote_email` | 팀원이 일반 공급업체 마스터에서도 관리 가능 |
-| 기존 `outbound_emails` | `scope` (nullable unique) | `inquiry_id:mode` 단위의 발송 잠금 |
-| 동일 테이블 | `mode`, `reply_status`, `request_data` | 모드, 회신 상태, 편집된 요청 전체와 첨부 데이터 |
+## 팀원이 이미 구현한 기능
 
-`0003_rfq_drafts`는 0002에서 승격한다. 기존 발송 기록은 `mode=legacy`, `scope=NULL`로 보존한다. 기존 성공은 `awaiting_reply`로 표시한다. 과거 SMTP 실패는 실제 수락 후 타임아웃일 수 있으므로 설정/입력 오류를 제외하면 `unknown`으로 보수적으로 이관한다. 기존 실제 발송/불명확 기록도 중복 발송·가상 회신 차단에 포함한다. 업체 이메일은 기존 JSON 구조에 저장하므로 별도 업체 테이블을 만들지 않았다.
+- Vendor.email, 공급업체 CSV email 열, CSV 읽기/쓰기와 workspace JSON 저장.
+- 결정론적 부족·확보 기한 계산, 견적 요청 1차 승인과 업체별 quoteDraft 생성.
+- ProcurementDesk의 simulation / gmail_mcp / smtp 선택 및 최종 확인 후 기존 POST /mail/quote-requests 호출.
+- Python MCP SDK 기반 Gmail 연결·발신 계정 확인·MIME/CSV 발송, 선택적 OAuth Gmail 게이트웨이. 기존 SMTP 어댑터도 유지.
+- 원본 revision/source_stamp·수량·일정 검증, 발송 이력·중복 요청/불명확 결과 재시도 차단.
+- Gmail 회신 조회와 담당자 확인 후 기존 AI 분석으로 전달.
 
-## 환경변수
+승인 직후 메일을 자동 발송하는 기능은 없다. 원격 FlowApp의 승인 후 이동은 문의 탭까지였고, ProcurementDesk 승인은 로컬 상태 변경이었다. 통합본은 기존 승인 함수를 재사용해 **서버 저장 성공 후** ProcurementDesk로 이동하거나 작성 영역으로 스크롤한다. 저장 실패/버전 충돌/보류는 작성 영역을 열지 않는다. 최종 구매 PO 승인은 별도 흐름으로 유지한다.
 
-서버 프로세스 환경 또는 기존 실행기의 루트 `.env` / `backend/.env`에 설정한다. `.runtime/local-demo.env`는 실행기가 로컬 시연 인증을 로드할 때 사용하는 파일이며, 일반 업무 설정은 `.env`에 두는 편이 명확하다. 변경 후 API/worker를 재시작한다. 프런트엔드 `VITE_*`에는 SMTP 비밀정보를 넣지 않는다.
+## 이번 담당 범위의 변경
 
-| 변수 | 기본값 / 동작 |
+- 기존 email 필드를 단일 기준으로 사용한다. quoteEmail/quote_email이라는 새 마스터 필드나 별도 공급업체 API를 만들지 않았다.
+- 신규 임시 업체 A/B/C에 supplier-a@example.com, supplier-b@example.com, supplier-c@example.com을 설정했다. 시드와 public/erp-csv/suppliers.csv가 일치한다.
+- 이전 로컬 quoteEmail 값은 email이 없는 경우에만 이어받는다. 기존 email이 우선하며 정규화 후 quoteEmail은 제거한다. 기존 PO의 고정 스냅샷은 바꾸지 않는다. 주소가 없으면 다른 사람 주소를 추정하지 않는다.
+- 선택한 업체 email을 즉시 표시한다. 변경한 주소는 업체 이메일 저장 버튼으로 기존 PUT /workspace에 저장한다. 화면 상태와 DB를 함께 갱신하므로 새로고침 뒤에도 유지된다. CSV 편집·저장 경로도 계속 사용할 수 있다.
+- 이메일만 변경할 때 수량·품질·공급 확약을 바꾸지 않으며, 불필요한 부족 재승인 팝업을 띄우지 않는다. 형식 오류·누락 주소는 안내하고 발송을 막는다.
+- 공통 default_recipient fallback과 기본 수신자 허용 예외를 제거했다. BIOFLOW_SMTP_DEFAULT_TO는 이전 설정 조회 호환용으로만 남고 업체 주소나 테스트 주소로 사용하지 않는다. 개인 팀원 이메일 리터럴도 소스에서 발견하지 못했다.
+- 실제 발신자는 기존 메일 설정의 default_sender를 읽기 전용으로 표시하고 서버에서도 일치 여부를 확인한다.
+- FlowApp의 오래된 두 번째 작성 폼·발송 핸들러를 제거했다. 작성·발송 UI는 ProcurementDesk, 발송 API는 팀원의 기존 POST 하나를 사용한다. SMTP 계정 연결 설정 화면은 유지한다.
+
+## 기존 API 사용법
+
+모든 경로는 /api/v1 접두사와 기존 세션 인증을 사용한다.
+
+| API | 사용 |
 |---|---|
-| `BIOFLOW_MAIL_MODE` | `preview`; `preview`, `test`, `live`만 허용. 잘못된 값도 preview |
-| `BIOFLOW_MAIL_TEST_TO` | 비어 있음. test 모드의 실제 수신자 한 명 |
-| `BIOFLOW_MAIL_TEST_ALLOWLIST` | 비어 있음. 쉼표로 구분한 허용 목록; TEST_TO가 포함되어야 함 |
-| `BIOFLOW_SMTP_HOST`, `PORT`, `SECURITY` | 기존 SMTP; 보안 모드 starttls 또는 ssl |
-| `BIOFLOW_SMTP_USERNAME`, `PASSWORD` | 기존 계정과 자격증명 |
-| `BIOFLOW_SMTP_DEFAULT_FROM`, `ALLOWED_FROM` | 기본 발신자와 쉼표 구분 발신 허용 목록 |
-| `BIOFLOW_SMTP_DEFAULT_TO` | 업체/테스트 수신자에는 사용하지 않는 이전 호환 설정 |
+| GET /workspace | 저장된 workflow.data.vendors[]의 id/email 조회. 새로고침·서버 업무 불러오기 |
+| PUT /workspace | 기존 expected_revision + workflow 전체 저장. 화면의 업체 이메일 저장과 승인 저장이 사용 |
+| GET /workspace/csv | revision 및 sources.suppliers CSV 조회 |
+| PUT /workspace/csv/suppliers | 기존 공급업체 CSV의 email 열을 변경해 저장. 본문은 content와 expected_revision |
+| GET /scenarios/main-workspace/suppliers | 파생 ERP 공급업체에 id/code/email 투영 조회 |
+| POST /mail/quote-requests | 기존 팀원 발송 API. simulation/gmail_mcp/smtp와 최종 확인·원본 검증 유지 |
+| GET /mail/settings | 기존 계정 설정 + recipient_policy/test_recipient/test_allowlist |
+| GET /mail/outbox?case_id=... | 기존 이력 + original_recipient/test_delivery 표시 |
 
-- **preview:** SMTP 설정 없이 초안과 미리보기 저장만 한다. 실제 발송·회신 대기로 기록하지 않는다.
-- **test:** 원래 업체 주소와 실제 TEST_TO를 각각 화면·응답에 표시한다. SMTP 봉투와 To는 허용 TEST_TO만 사용하고, 제목/본문에 테스트 표시를 추가한다. 주소를 추정하거나 DEFAULT_TO로 대체하지 않는다. `reply_status=test_only`이며 공급 확인/공급 확약이 아니다.
-- **live:** 업체별 마스터 주소로만 발송한다. 주소 누락·형식 오류와 example.com/net/org 및 `.test`, `.invalid`, localhost 주소(하위 도메인 포함)를 차단한다.
-- 예시 업체 주소로 test 모드 미리보기/리디렉션은 가능하지만, 그 예시 주소 자체로는 SMTP를 호출하지 않는다. 허용 테스트 수신자로도 예시 도메인은 사용할 수 없다.
+workspace 저장 요청은 다음 구조다. workflow는 GET으로 읽은 전체 원본을 보존해 보내야 한다. 서버가 반환한 revision으로 다음 변경을 진행하고 409이면 최신 업무를 불러와 충돌을 해결한다.
 
-실제 수신 주소는 관리자가 직접 설정해야 한다. 이번 구현/테스트에서는 실제 이메일을 발송하지 않았다.
-
-## 요청·응답 계약
-
-기존 `/api/v1/mail` 및 `/api/v1/workspace` 경로를 확장했다. 모두 기존 세션 인증을 사용하며 메일과 1차 승인은 `approver` 권한이 필요하다.
-
-### 1차 승인
-
-`POST /api/v1/workspace/commands`
-
-```json
+~~~json
 {
-  "command": "approveInquiry",
-  "args": {"approve": true},
-  "expected_revision": 3
+  "expected_revision": 3,
+  "workflow": {
+    "data": {"vendors": [{"id":"B", "email":"quotes@your-supplier-domain"}]}
+  }
 }
-```
+~~~
 
-응답은 기존 `{scenario_id, revision, workflow, stamp, data_revision, engine}`다. `workflow.approvals[0]`는 kind=1이고 인증된 담당자 이메일을 actor로 저장한다. `workflow.inquiries`에 업체별 문의가 들어 있다. `approve=false`는 보류이며 신규 문의를 만들지 않는다. 기존 문의는 이력 보존을 위해 남는다. `startInquiries` 재호출은 동일 문의를 반환한다. 문의 생성과 승인 저장 후에 클라이언트가 작성 화면을 열며 최종 구매 승인은 `registerPO`로 별도 처리한다.
+위 구조는 설명용 발췌다. 실제 요청에는 기존 schema/products/lots/productions/vendors/config/approvals/inquiries/orders 등의 전체 workflow가 필요하다. CSV 방식은 GET /workspace/csv의 sources.suppliers 전체 양식에서 해당 ID 행의 email만 변경해 보낸다.
 
-### 초안 저장 / 미리보기·발송
-
-- `PUT /api/v1/mail/quote-requests`: 초안 저장
-- `POST /api/v1/mail/quote-requests`: 현재 서버 모드로 미리보기 또는 발송
-- 필수 헤더 `Idempotency-Key`: 16~200자. UI는 문의 ID와 모드를 포함한 안정된 키를 재사용한다.
-
-두 요청의 본문은 같다. 기존 요청에 **`inquiry_id`, `expected_revision`을 필수로 추가**했다. 팀원 클라이언트도 함께 갱신해야 하며 이전 형태는 422다.
-
-```json
+~~~json
 {
-  "case_id": "PR-IL7-20261024",
-  "inquiry_id": "서버가 반환한 RFQ ID",
-  "expected_revision": 4,
-  "vendor_id": "A",
-  "vendor_name": "A · 대량 할인",
-  "sender_email": "",
-  "recipient_email": "supplier-a@example.com",
-  "subject": "견적 요청: MAT-IL7 · PR-IL7-20261024",
-  "body": "담당자가 검토하고 편집한 요청 본문",
-  "material_code": "MAT-IL7",
-  "material_name": "재조합 인간 IL-7",
-  "unit": "바이알",
-  "required_quantity": 12,
-  "safety_stock": 2,
-  "schedule": [
-    {"production_id":"PROD-01","needed_date":"2026-11-04","quantity":4},
-    {"production_id":"PROD-02","needed_date":"2026-11-11","quantity":4},
-    {"production_id":"PROD-03","needed_date":"2026-11-18","quantity":4}
-  ]
+  "expected_revision": 3,
+  "content": "기존 공급업체 CSV 전체 내용"
 }
-```
+~~~
 
-`sender_email`/`recipient_email`는 초안 보존을 위해 빈 문자열을 허용한다. 실제/테스트 발송에는 유효한 허용 발신자와 업체 주소가 필요하다. preview에서도 잘못된 업체 주소의 발송 동작은 422이며 초안은 남는다. 모드·실제 테스트 수신 주소는 클라이언트가 선택하지 못한다. `recipient_email`, 업체명, 원료·수량·단위·일정은 서버의 승인된 ERP와 비교한다. 제목·본문은 자유롭게 편집하되 헤더 줄바꿈을 차단한다.
+발송 요청 계약은 팀원의 QuoteEmailInput을 유지한다. quoteDraft의 case_id/vendor_id/vendor_name/recipient_email/원료/수량/일정, 설정의 sender_email, 담당자가 확인한 subject/body에 expected_revision, source_stamp, final_confirmation=true, delivery_mode를 추가한다. Idempotency-Key 헤더도 유지한다. 서버는 recipient_email이 선택한 업체의 저장된 email인지 확인하며 임의 주소나 공통 기본 수신자 우회를 거부한다.
 
-성공 응답 예시:
+실제 발송 성공 응답의 recipient는 실제 SMTP/MCP 대상이고 original_recipient는 마스터 업체 주소다. test_delivery=true이면 테스트 수신자에게 보낸 결과다. 원래 주소와 실제 대상은 payload에도 보존한다. HTTP 상태 외에 기존 status(sent/simulated/sending/failed/uncertain/replied)를 함께 확인해야 한다. 공급 확약은 메일 sent와 별개이며 기존 명시적 회신 확인 절차를 거친다.
 
-```json
-{
-  "id":"발송/초안 ID",
-  "case_id":"PR-IL7-20261024",
-  "vendor_id":"A",
-  "vendor_name":"A · 대량 할인",
-  "sender":"buyer@your-company-domain",
-  "recipient":"관리자가 설정한 실제 테스트 주소",
-  "original_recipient":"supplier-a@example.com",
-  "subject":"견적 요청 제목",
-  "mode":"test",
-  "status":"sent",
-  "reply_status":"test_only",
-  "message_id":"<SMTP Message-ID>",
-  "error_code":null,
-  "draft":{},
-  "created_at":"ISO-8601 UTC",
-  "updated_at":"ISO-8601 UTC"
-}
-```
+## 발송 정책과 설정
 
-실제 `draft`에는 제출한 본문 전체가 들어 있다. 이미 sent인 같은 문의/모드 요청은 발송 없이 기존 응답에 `already_sent=true`를 추가한다. 새 키를 만들어도 scope 고유 제약과 상태 잠금으로 중복 발송하지 못한다. 한 구매요청·업체의 legacy/live 발송 이력이 있으면 새 문의 ID로 우회한 live 발송도 차단한다.
+새 전송 시스템이 아니라 기존 dispatch의 수신자 검증이다. 실제 계정·OAuth·MCP 설정은 팀원의 docs-team/CSV-RFQ.md와 .env.example을 따른다.
 
-- `GET /api/v1/mail/settings`: 기존 안전한 설정 + `mode`, `test_recipient`, `test_allowlist`. 비밀번호/토큰은 반환하지 않는다.
-- `GET /api/v1/mail/outbox?case_id=...`: 위 응답 형태의 최근 50건. 원래 주소·실제 대상·편집 내용·상태 복구에 사용한다.
-- `422`: 입력/설정/예시 주소 오류. 설정 또는 업체 마스터를 수정한다.
-- `409`: 승인/버전 불일치, 다른 요청에 사용한 키, 이미 처리 중, 확인이 필요한 결과. 다른 키로 우회 재시도하지 않는다.
-- SMTP 처리 후의 `failed`/`unknown`은 **200 응답의 `status`**로 반환한다. HTTP 200만으로 발송 성공으로 판단하지 말아야 한다.
+| 변수 | 동작 |
+|---|---|
+| BIOFLOW_MAIL_MODE=preview | 기본값. 실제 발송을 막고 기존 simulation만 허용. 잘못된 모드 값도 preview |
+| BIOFLOW_MAIL_MODE=test | 기존 gmail_mcp/smtp를 선택해도 허용 테스트 주소로만 전송 |
+| BIOFLOW_MAIL_TEST_TO | 실제 허용 테스트 수신자 1명. 설정 없으면 차단 |
+| BIOFLOW_MAIL_TEST_ALLOWLIST | 쉼표 구분 목록. TEST_TO가 반드시 포함되어야 함 |
+| BIOFLOW_MAIL_MODE=live | 마스터 업체 email로 전송. 예시 도메인은 차단 |
+| BIOFLOW_SMTP_DEFAULT_FROM / ALLOWED_FROM | 기존 발신 계정 설정. 화면에서 임의 발신자로 변경하지 않음 |
 
-## 상태 전이와 동시성
+example.com/net/org 및 하위 도메인, .test/.invalid/localhost 주소에는 실제 전송하지 않는다. 예시 업체 주소를 test 모드의 원래 주소로 표시할 수는 있지만 실제 대상은 별도 허용 목록의 비예시 주소여야 한다. 허용 테스트 주소를 임의로 채우거나 DEFAULT_TO로 대체하지 않는다.
 
-| 상태 | 의미 | 다음 동작 |
-|---|---|---|
-| `draft` | 서버에 편집 내용 저장 | 편집 또는 명시적 발송 |
-| `preview` | 검토용 저장 완료, 실제 발송 없음 | 편집 가능; test/live 전환은 서버 설정으로 별도 scope 사용 |
-| `sending` | DB에 발송 소유권 저장 후 SMTP 호출 중 | 중복 발송/초안 변경 차단; 오래 남으면 확인 필요 |
-| `sent` | SMTP가 수락 | 재발송 없이 기존 결과 반환 |
-| `failed` | 전송 전 오류 또는 SMTP의 명시적 거절 | 초안 유지; 원인 수정 후 담당자가 재시도 가능 |
-| `unknown` | DATA 중 타임아웃/연결 종료 등 결과 불명확 | 자동/수동 버튼 재시도 모두 차단; 메일함/SMTP 기록으로 확인 |
+화면에는 원래 업체 주소와 실제 수신 대상/전송 없음이 표시된다. 테스트 메일에는 테스트 제목·본문을 추가하고, 테스트 회신을 공급 확약으로 승격하는 sync/confirm-reply는 서버에서 막는다. 실제·테스트 발송 중/성공/불명확 업체를 가상 회신에서 제외한다.
 
-`reply_status`는 별도로 `not_requested`(초안/미리보기), `awaiting_reply`(실제 업체 회신 대기), `test_only`(테스트), `check_required`(결과 확인 필요)를 기록한다. 발송 성공이 `공급 확인`으로 전이하지 않는다.
+## DB와 실행
 
-초안 저장과 발송 직전에 기존 workspace 버전 잠금을 확인한다. 발송 소유권은 scope 고유 제약 + 상태/updated_at 조건부 UPDATE로 획득하고 SMTP 호출 **전에 커밋**한다. 병렬 요청은 하나만 전송한다. 네트워크 응답 손실 후에는 동일 문의를 조회한다. 서버 프로세스가 종료되어 sending이 남아도 자동으로 재발송하지 않는다. 실패/성공/불명확 결과는 기존 감사 테이블에도 기록한다.
-
-서버 `receiveReplies`는 DB의 legacy/live/test 발송 중·성공·불명확 업체를 조회해 가상 회신에서 제외한다. 브라우저도 이력 조회 실패 시 연결 모드의 가상 회신을 중단한다. 실제/테스트 발송 업체에 가상 확약을 끼워 넣은 workspace 업로드도 거절한다. 테스트 업체는 `테스트 메일 · 공급 확인 미진행`으로 구분한다.
-
-## 실행과 검증
+업체 email은 기존 JSON/CSV 필드이므로 이번 담당 범위를 위한 새 테이블·이메일 전용 마이그레이션은 없다. 팀원의 0003_quote_workflow는 OutboundEmail에 MCP/원본/회신 메타데이터를 추가하므로 그대로 포함했다. 공급업체 데이터와 기존 0002 메일 이력 보존은 임시 DB 마이그레이션 테스트로 확인한다. 사용자 .runtime/bioflow.db를 테스트에 사용하거나 초기화하지 않았다.
 
 PowerShell, 프로젝트 루트:
 
-```powershell
-npm run build
+~~~powershell
+.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
 npm test
 .venv\Scripts\python.exe -m pytest -q backend/tests
+npm run build
 .venv\Scripts\python.exe scripts/run-local.py
-```
+~~~
 
-기존 실행기는 시작할 때 `alembic upgrade head`를 실행하고 `.runtime/bioflow.db`를 사용한다. 배포 DB는 기존 `DATABASE_URL`을 설정하고 backend 작업 디렉터리에서 `python -m alembic upgrade head` 후 API/worker를 재시작한다. 데이터 삭제/초기화는 필요 없다. 원래 npm의 `start:local`/`test:api`는 POSIX 가상환경 경로를 사용하므로 Windows에서는 위 직접 명령을 사용한다.
+기존 실행기는 시작할 때 alembic upgrade head를 실행한다. 설정 변경이나 통합본 실행에는 기존 API/worker를 종료 후 재시작한다. 실제 테스트 수신자가 설정되지 않은 상태에서는 preview/simulation으로 확인한다. 기본 실행은 외부 메일 발송을 하지 않는다.
 
-테스트는 별도 임시 DB와 모의 SMTP만 사용한다. 검증 범위: 저장된 승인 후 작성 callback 실행, 저장 실패/버전 충돌/보류 시 미실행, 업체별 자동 작성, 누락/잘못된/예시 주소 차단, 서버 수신자 변조 거절, 테스트 허용 목록과 실제 SMTP To/봉투 일치, 병렬 클릭/다른 키 중복 방지, 명시적 거절 재시도와 초안 보존, 모호한 결과 차단, 실제/테스트 업체의 가상 회신 제외, 기존 0002 데이터 보존 마이그레이션.
+## 검증과 남은 확인
 
-검증 결과: 백엔드 전체 140개, 프런트엔드 79개 통과. TypeScript 및 프로덕션 빌드 통과. 기존 Vite 큰 청크 경고와 Starlette/Alembic 사용 중단 예정 경고가 남는다. 개발자의 `.runtime/bioflow.db`에는 테스트 마이그레이션을 실행하지 않았으며, 기존 실행기 재시작 시 실제 DB 마이그레이션이 적용된다.
+최종 결과: 프런트엔드 94개, 백엔드 152개 통과. 프로덕션 빌드 통과. Headless Edge와 격리 SQLite DB에서 승인 저장 후 작성 영역 진입, A/B 업체별 주소, B 주소 변경·저장·새로고침 복원, simulation 처리, preview 정책의 실제 발송 차단을 확인했다. 실제 발송 요청은 발생하지 않았다. 로컬 스크린샷: .runtime/browser-check/supplier-email-verified.png. 사용자 DB는 변경하지 않았다.
 
-## 변경 파일
 
-- 화면/워크플로: `src/workflow/FlowApp.tsx`, `engine.ts`, `quoteMail.ts`, `quoteMail.test.ts`
-- 업체 정보: `src/erp/model.ts`, `store.ts`, `viewData.ts`, `src/connected/vendor/erpSchema.ts`
-- 서버 연결/공유 엔진: `src/connected/connection.ts`, `connection.test.ts`, `scripts/workflow-runner.ts`
-- 서버: `backend/app/main.py`, `models.py`, `schemas.py`, `db.py`, `services/workspace.py`, `services/mailer.py`, `services/quote_requests.py`
-- 마이그레이션/검증: `backend/migrations/versions/0003_rfq_drafts.py`, `backend/tests/conftest.py`, `test_mailer.py`, `test_quote_requests.py`, `test_rfq_migration.py`
-- 설정/문서: `.env.example`, 이 문서
+- 프런트엔드: 업체별 자동 표시, 주소 오류/예시 차단, 이전 주소 호환, 저장 후 로컬 복원, 승인 저장 성공/실패/충돌/보류 순서, 기존 CSV/계산/분석 테스트.
+- 백엔드: 기존 CSV 저장·조회·ERP 투영, 새 조회로 저장 내용 복원, 버전 충돌, 주소/발신자 변조·기본 수신자 우회 차단, 테스트 허용 목록·MCP 실제 인자, 테스트 회신 승격 차단, 기존 MCP SDK/게이트웨이·실제 회신 확인 테스트.
+- 실제 메일·Google 호출은 모의 처리한다. 실제 SMTP 전달·사용자 OAuth 계정과 PostgreSQL 실서버 검증은 별도 설정 후 담당자가 수행해야 한다.
+- 빌드에는 기존 Vite 큰 청크 경고, 테스트에는 기존 Starlette/Alembic 사용 중단 예정 경고가 남을 수 있다.
+- source-manifest와 격리 브라우저 검증 산출물은 .runtime에만 남고 Git에 포함하지 않는다.
 
-Windows에서 기존 공유 엔진 subprocess의 cp949 디코딩 오류가 있어 UTF-8을 명시했다. 기존 메일 인증 테스트의 POSIX 권한 비트 검사는 Windows에 해당하지 않아 해당 플랫폼에서만 생략한다.
+## 파일별 소유 범위
 
-## 남은 한계
+팀원에서 그대로 가져온 핵심 파일: gmail_mcp.py, gmail_gateway.py, 0003_quote_workflow.py, CSV 파서/규칙/기본 API, 기존 OAuth 실행기·의존성.
 
-- SMTP는 전달/열람/실제 회신 자동 동기화를 제공하지 않는다. 실제 회신을 증빙과 함께 ERP 조건으로 반영하는 기능은 기존 범위를 따른다.
-- unknown/sending의 확인·해제·재문의 운영 화면은 없다. Message-ID와 메일 서버 기록을 담당자가 확인해야 한다. 해제 없이 다른 키로 보내는 경로는 제공하지 않는다.
-- 검증은 단위/서버 통합/SQLite 마이그레이션과 빌드다. 실제 SMTP 수신 확인, 브라우저 E2E, PostgreSQL 실서버 마이그레이션은 실행하지 않았다.
-- 초안 자동 복원은 같은 브라우저의 저장소를 사용한다. 다른 기기와 공유하려면 초안 저장 버튼을 사용한다. 모드별 전송 결과는 DB에 분리되지만 본문 편집 초안은 문의별로 복원한다.
-- 기존 Gmail 자격증명 파일의 Windows ACL 관리는 이 변경에 포함하지 않았다. 기존 방식보다 새로운 자격증명 저장 경로를 추가하지 않았다.
-- 공급/품질 데이터와 회신 기한에는 기존 시연 달력과 합성 가정이 남아 있다. 실제 업무 데이터·업체 주소·일정을 검토한 뒤 명시적으로 모드를 설정해야 한다.
+원격 대비 이번 보완 파일: .env.example; services/mailer.py(수신 정책); services/quote_requests.py(기존 dispatch 주소/대상 검증); services/workspace.py(주소 호환·Windows UTF-8·가상 회신 제외); main.py(테스트 회신 차단); scripts/workflow-runner.ts(기존 ERP email 투영); src/erp/model.ts/store.ts/viewData.ts와 erpSchema.ts(기존 필드 표시); ProcurementDesk.tsx/FlowApp.tsx/procurement.ts/engine.ts/store.ts/supplierEmail.ts(단일 화면·저장·복원); public/erp-csv/suppliers.csv(예시 데이터); 관련 테스트와 이 문서.
+
+이전 작업의 변경 파일 목록(체크포인트에 원본 보존):
+- .env.example
+- backend/app/db.py
+- backend/app/main.py
+- backend/app/models.py
+- backend/app/schemas.py
+- backend/app/services/mailer.py
+- backend/app/services/quote_requests.py
+- backend/app/services/workspace.py
+- backend/migrations/versions/0003_rfq_drafts.py
+- backend/tests/conftest.py
+- backend/tests/test_mailer.py
+- backend/tests/test_quote_requests.py
+- backend/tests/test_rfq_migration.py
+- docs-team/RFQ_EMAIL_INTEGRATION.md
+- scripts/workflow-runner.ts
+- src/connected/connection.test.ts
+- src/connected/connection.ts
+- src/connected/vendor/erpSchema.ts
+- src/erp/model.ts
+- src/erp/store.ts
+- src/erp/viewData.ts
+- src/workflow/FlowApp.tsx
+- src/workflow/engine.ts
+- src/workflow/quoteMail.test.ts
+- src/workflow/quoteMail.ts

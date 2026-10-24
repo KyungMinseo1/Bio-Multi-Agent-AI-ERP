@@ -84,13 +84,15 @@ class SMTPConnectInput(StrictModel):
 
 
 class QuoteEmailInput(StrictModel):
-    inquiry_id: str = Field(min_length=1, max_length=100)
-    expected_revision: int = Field(ge=1)
+    delivery_mode: Literal["simulation", "smtp", "gmail_mcp"] = "smtp"
+    expected_revision: int | None = None
+    source_stamp: str = ""
+    final_confirmation: bool = False
     case_id: str = Field(min_length=1, max_length=100)
     vendor_id: str = Field(min_length=1, max_length=100)
     vendor_name: str = Field(min_length=1, max_length=200)
-    sender_email: str = Field(max_length=254)
-    recipient_email: str = Field(max_length=254)
+    sender_email: str = Field(min_length=3, max_length=254)
+    recipient_email: str = Field(min_length=3, max_length=254)
     subject: str = Field(min_length=2, max_length=250)
     body: str = Field(min_length=10, max_length=12000)
     material_code: str = Field(min_length=1, max_length=100)

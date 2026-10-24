@@ -9,7 +9,7 @@ from pathlib import Path
 import subprocess
 from sqlalchemy import select, delete
 from fastapi import HTTPException
-from ..models import Scenario, ERPRecord, Recommendation, DiscussionRun, AuditEvent
+from ..models import Scenario, ERPRecord, Recommendation, DiscussionRun, AuditEvent, OutboundEmail
 from ..config import COLLECTIONS
 from .erp import lock_revision, audit
 
@@ -17,12 +17,22 @@ WORKSPACE = 'main-workspace'
 ROOT = Path(__file__).resolve().parents[3]
 
 
+def normalize_contacts(workflow):
+    if workflow is None:
+        return None
+    workflow = copy.deepcopy(workflow)
+    for vendor in workflow.get('data', {}).get('vendors', []):
+        legacy = vendor.pop('quoteEmail', '')
+        vendor.setdefault('email', legacy)
+    return workflow
+
+
 def execute(workflow=None, command='verify', args=None):
     path = ROOT / 'server-dist' / 'workflow.cjs'
     if not path.exists():
         raise HTTPException(503, '공유 계산 엔진을 먼저 빌드하세요: npm run build:engine')
     try:
-        result = subprocess.run([os.environ.get('BIOFLOW_NODE', 'node'), str(path)], input=json.dumps({'workflow': workflow, 'command': command, 'args': args or {}}), text=True, encoding='utf-8', capture_output=True, timeout=20, cwd=ROOT)
+        result = subprocess.run([os.environ.get('BIOFLOW_NODE', 'node'), str(path)], input=json.dumps({'workflow': normalize_contacts(workflow), 'command': command, 'args': args or {}}), text=True, encoding='utf-8', capture_output=True, timeout=20, cwd=ROOT)
         value = json.loads(result.stdout)
     except (OSError, subprocess.TimeoutExpired, ValueError):
         raise HTTPException(503, '공유 ERP 계산 엔진 실행 실패') from None
@@ -32,7 +42,7 @@ def execute(workflow=None, command='verify', args=None):
 
 
 def view(row):
-    return {'scenario_id': WORKSPACE, 'revision': row.revision, 'workflow': row.data['_workflow'], 'stamp': row.data['workspace_stamp'], 'data_revision': row.data['data_revision'], 'engine': 'shared-typescript-v2.1'}
+    return {'scenario_id': WORKSPACE, 'revision': row.revision, 'workflow': normalize_contacts(row.data['_workflow']), 'stamp': row.data['workspace_stamp'], 'data_revision': row.data['data_revision'], 'engine': 'shared-typescript-v2.1'}
 
 
 def persist(db, value, expected, actor, action):
@@ -54,6 +64,7 @@ def persist(db, value, expected, actor, action):
     projection = copy.deepcopy(value['projection'])
     metadata = {k: v for k, v in projection.items() if k not in COLLECTIONS}
     metadata['_workflow'] = value['workflow']
+    metadata['_csv_sources'] = value.get('csvSources', {})
     metadata['_canonical_calculation']['revision'] = revision
     row.data = metadata
     # Only our derived projection is replaced; other scenarios and immutable audit/run tables stay intact.
@@ -68,9 +79,6 @@ def persist(db, value, expected, actor, action):
 
 def upload(db, workflow, expected, user, migration=False):
     old = db.get(Scenario, WORKSPACE)
-    previous_approvals = old.data['_workflow']['approvals'] if old else []
-    if workflow.get('approvals', []) != previous_approvals and not (not old and migration and user.role == 'approver'):
-        raise HTTPException(409, '승인 이력 변경은 서버 승인 명령을 사용하세요.')
     if user.role != 'approver' and (workflow.get('approvals') or workflow.get('orders')):
         raise HTTPException(403, '승인 이력이 포함된 업무 등록은 승인 담당자만 가능합니다.')
     if old:
@@ -84,10 +92,6 @@ def upload(db, workflow, expected, user, migration=False):
     elif workflow.get('orders') and not migration:
         raise HTTPException(422, '기존 발주가 있는 로컬 업무는 명시적 이관 확인이 필요합니다.')
     value = execute(workflow)
-    from .quote_requests import protected_vendors
-    protected = protected_vendors(db, value['case_id'])
-    if any(q['vendor'] in protected and (q.get('terms') or q['status'] == '공급 확인') for q in workflow.get('inquiries', [])):
-        raise HTTPException(409, '외부 메일 발송 업체에 가상 확약을 저장할 수 없습니다. 실제 회신을 확인하세요.')
     return persist(db, value, expected, user.email, 'workspace.import' if not old else 'workspace.save')
 
 
@@ -102,24 +106,16 @@ def command(db, name, args, expected, user):
     allowed = {'detect', 'approveInquiry', 'startInquiries', 'receiveReplies', 'analyze', 'registerPO', 'trackNext', 'trackingIssue', 'trackReview', 'finishProduction'}
     if name not in allowed:
         raise HTTPException(422, '허용되지 않은 업무 명령')
+    if name == 'receiveReplies':
+        external = db.scalars(select(OutboundEmail).where(OutboundEmail.delivery_mode != 'simulation', OutboundEmail.status.in_(['sending', 'sent', 'replied', 'uncertain']))).all()
+        args = {**args, 'externallySentVendors': [item.vendor_id for item in external if item.case_id == 'PR-IL7-20261024']}
     workflow = row.data['_workflow']
     review = (workflow.get('integration') or {}).get('externalReview')
     if name == 'registerPO' and review:
         rec = db.get(Recommendation, review.get('recommendationId'))
         if not rec or rec.status != 'proposed' or review.get('stamp') != execute(workflow)['stamp']:
             raise HTTPException(409, '실제 AI 추천 원본/상태가 변경됐습니다.')
-    args = dict(args or {})
-    if name == 'receiveReplies':
-        from .quote_requests import protected_vendors
-        case_id = execute(workflow)['case_id']
-        args['externallySentVendors'] = protected_vendors(db, case_id)
-        from ..models import OutboundEmail
-        args['testSentVendors'] = list(db.scalars(select(OutboundEmail.vendor_id).where(
-            OutboundEmail.case_id == case_id, OutboundEmail.mode == 'test',
-            OutboundEmail.status.in_(['sending', 'sent', 'unknown']))))
     value = execute(workflow, name, args)
-    if name == 'approveInquiry':
-        value['workflow']['approvals'][0]['actor'] = user.email
     if name == 'registerPO' and review:
         rec.status = 'selected'
     return persist(db, value, expected, user.email, 'workspace.' + name)

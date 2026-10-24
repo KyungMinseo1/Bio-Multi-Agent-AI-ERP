@@ -5,6 +5,7 @@ import json
 import secrets
 from contextlib import asynccontextmanager
 from datetime import timedelta
+from email.utils import make_msgid
 from urllib.parse import urlsplit
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request, Response, Header
 from fastapi.responses import StreamingResponse
@@ -25,7 +26,7 @@ from .services.discussions import artifact
 from .services.external_sources import seed_sources, sync_source, validate_url, public_addresses, CollectionError
 from .services.planning import evaluate
 from .models import utc_iso
-from .services.mailer import MailConfigurationError, MailDeliveryError, connect_gmail, public_mail_settings
+from .services.mailer import MailConfigurationError, MailDeliveryError, connect_gmail, mail_configuration, public_mail_settings, send_quote_email, validate_email_address
 
 
 @asynccontextmanager
@@ -79,22 +80,75 @@ def email_outbox(case_id: str, user=Depends(approver), db=Depends(get_db)):
         .order_by(OutboundEmail.created_at.desc())
         .limit(50)
     ).all()
-    from .services.quote_requests import public
-    return [public(row) for row in rows]
-
-
-@api.put("/mail/quote-requests")
-def save_quote_request(body: QuoteEmailInput, idempotency_key: str = Header(..., alias="Idempotency-Key"),
-                       user=Depends(approver), db=Depends(get_db)):
-    from .services.quote_requests import save
-    return save(db, body, idempotency_key, user)
+    from .services.quote_requests import view
+    return [view(row) for row in rows]
 
 
 @api.post("/mail/quote-requests")
-def send_quote_request(body: QuoteEmailInput, idempotency_key: str = Header(..., alias="Idempotency-Key"),
-                       user=Depends(approver), db=Depends(get_db)):
-    from .services.quote_requests import save
-    return save(db, body, idempotency_key, user, dispatch=True)
+async def send_quote_request(body: QuoteEmailInput, idempotency_key: str = Header(..., alias="Idempotency-Key"), user=Depends(approver), db=Depends(get_db)):
+    from .services.quote_requests import dispatch
+    return await dispatch(db, body, idempotency_key, user)
+
+
+@api.get("/mail/mcp/status")
+async def gmail_mcp_status(user=Depends(approver)):
+    from .services.gmail_mcp import connection_status
+    try:
+        return await connection_status(mail_configuration().default_sender)
+    except MailConfigurationError as exc:
+        raise HTTPException(503, str(exc)) from None
+
+
+@api.post("/mail/outbox/{dispatch_id}/sync")
+async def gmail_reply_sync(dispatch_id: str, user=Depends(approver), db=Depends(get_db)):
+    from .services.gmail_mcp import read_replies
+    delivery = db.get(OutboundEmail, dispatch_id)
+    if not delivery or delivery.delivery_mode != "gmail_mcp" or delivery.status not in {"sent", "replied"}:
+        raise HTTPException(422, "발송 완료된 Gmail MCP 요청을 선택하세요.")
+    if (delivery.payload or {}).get('test_delivery'):
+        raise HTTPException(422, '테스트 발송은 실제 공급업체 회신으로 처리할 수 없습니다.')
+    try:
+        delivery.responses = await read_replies(delivery)
+        db.commit()
+        return {"responses": delivery.responses}
+    except MailConfigurationError as exc:
+        raise HTTPException(503, str(exc)) from None
+
+
+@api.post("/mail/outbox/{dispatch_id}/confirm-reply")
+def confirm_quote_reply(dispatch_id: str, body: dict, user=Depends(approver), db=Depends(get_db)):
+    from .services import workspace
+    delivery = db.get(OutboundEmail, dispatch_id)
+    if delivery and (delivery.payload or {}).get('test_delivery'):
+        raise HTTPException(422, '테스트 발송 회신은 공급 확약으로 등록할 수 없습니다.')
+    message = next((m for m in (delivery.responses or []) if m['id'] == body.get('message_id')), None) if delivery else None
+    row = db.get(Scenario, workspace.WORKSPACE)
+    if not delivery or not message or not row or row.revision != body.get('expected_revision'):
+        raise HTTPException(409, "검증된 메일 회신과 현재 업무 버전을 확인하세요.")
+    if row.data['_workflow']['data']['revision'] != (delivery.payload or {}).get('approved_data_revision'):
+        raise HTTPException(409, '견적 요청 이후 원본이 변경됐습니다. 최신 조건으로 다시 요청하세요.')
+    value = workspace.execute(row.data['_workflow'], 'supplierReply', {'vendor': delivery.vendor_id, 'terms': body.get('terms'), 'original': message['body'], 'reference': 'gmail_mcp:'+message['id']})
+    delivery.status = 'replied'
+    return workspace.persist(db, value, row.revision, user.email, 'gmail.reply.confirmed')
+
+
+@api.get("/workspace/csv")
+def workspace_csv(user=Depends(current_user), db=Depends(get_db)):
+    from .services import workspace
+    row = db.get(Scenario, workspace.WORKSPACE)
+    if not row:
+        raise HTTPException(404, "현재 업무를 먼저 서버에 저장하세요.")
+    return {"revision": row.revision, "sources": workspace.execute(row.data['_workflow'])['csvSources']}
+
+
+@api.put("/workspace/csv/{kind}")
+def workspace_csv_import(kind: str, body: dict, user=Depends(approver), db=Depends(get_db)):
+    from .services import workspace
+    row = db.get(Scenario, workspace.WORKSPACE)
+    if not row or row.revision != body.get('expected_revision') or not isinstance(body.get('content'), str) or len(body['content']) > 2_000_000:
+        raise HTTPException(409, "CSV 내용과 서버 업무 버전을 확인하세요.")
+    value = workspace.execute(row.data['_workflow'], 'importCSV', {'kind': kind, 'csv': body['content']})
+    return workspace.persist(db, value, row.revision, user.email, 'csv.import.'+kind)
 
 
 @api.post("/settings/test-provider")

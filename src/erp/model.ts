@@ -1,3 +1,4 @@
+import type {PlannedReceipt} from '../workflow/rules';
 import {addDays,BASE} from '../data';
 export {BASE,addDays};
 export type Scenario='base'|'qc-delay'|'production-delay'|'temperature'|'quality-scope'|'unrelated'|'cash'|'c-quality';
@@ -6,10 +7,10 @@ export interface Product {id:string;name:string;manufacturer:string;sku:string;f
 export interface Lot {id:string;material:string;quantity:number;qc:'합격'|'품질 보류';qa:'승인'|'미승인';expiry:string;coa:string;temperature:'적합'|'이탈';hold:string;releaseCondition:string;received:string;}
 export interface Production {id:string;name:string;date:string;il7:number;il15:number;completion:string;delivery:string;budget:number;}
 export interface Shipment {id:string;lot:string;quantity:number;arrival:string;expiry:string;qcDelay:number;temperature:'적합'|'이탈';qaHold:boolean;confirmed:boolean;coa:string;commitment:string;payment:string;cashLimit:number;}
-export interface Vendor {id:string;name:string;quoteEmail?:string;unitPrice:number;moq:number;multiple:number;shipping:number;approved:boolean;productApproved:boolean;confirmed:boolean;quoteExpiry:string;quoteRef:string;contractRef:string;changeTerms:string;shipments:Shipment[];}
+export interface Vendor {email?:string;leadDays?:number;id:string;name:string;unitPrice:number;moq:number;multiple:number;shipping:number;approved:boolean;productApproved:boolean;confirmed:boolean;quoteExpiry:string;quoteRef:string;contractRef:string;changeTerms:string;shipments:Shipment[];}
 export interface Config {budget:number;qcDays:number;qaDays:number;testingPerLot:number;storagePerVialDay:number;disposalPerVial:number;safetyBudget:number;horizon:string;scenario:Scenario;}
 export interface QualityNotice {id:string;manufacturer:string;product:string;lot:string;relevanceConfirmed:boolean;note:string;}
-export interface ErpData {schema:2;notices:QualityNotice[];revision:number;products:Product[];lots:Lot[];productions:Production[];vendors:Vendor[];config:Config;changes:Change[];}
+export interface ErpData {plannedReceipts?:PlannedReceipt[];schema:2;notices:QualityNotice[];revision:number;products:Product[];lots:Lot[];productions:Production[];vendors:Vendor[];config:Config;changes:Change[];}
 export interface Change {id:string;at:string;entity:string;field:string;before:string;after:string;}
 export interface ScenarioInfo {id:Scenario;name:string;description:string;source:string;}
 export const scenarios:ScenarioInfo[]=[
@@ -31,9 +32,9 @@ export function createSeed():ErpData{return {
  {id:'IL7-LOT-03',material:'MAT-IL7',quantity:2,qc:'합격',qa:'승인',expiry:'2026-10-31',coa:'COA-IL7-03',temperature:'적합',hold:'최초 생산 투입일 이전 유효기간 만료',releaseCondition:'유효기간 연장 가정 금지 · 별도 폐기 절차 필요',received:'2026-09-01'},
  {id:'IL15-LOT-01',material:'MAT-IL15',quantity:20,qc:'합격',qa:'승인',expiry:'2027-03-31',coa:'COA-IL15-01',temperature:'적합',hold:'',releaseCondition:'QC 적합 및 QA 승인',received:'2026-10-01'}],
  productions:[{id:'PROD-01',name:'T 세포 배양 · Pilot 01',date:'2026-11-04',il7:4,il15:4,completion:'2026-11-09',delivery:'2026-11-12',budget:2400000},{id:'PROD-02',name:'T 세포 배양 · Pilot 02',date:'2026-11-11',il7:4,il15:4,completion:'2026-11-16',delivery:'2026-11-19',budget:4300000},{id:'PROD-03',name:'T 세포 배양 · Pilot 03',date:'2026-11-18',il7:4,il15:4,completion:'2026-11-23',delivery:'2026-11-26',budget:4300000}],
- vendors:[{id:'A',quoteEmail:'supplier-a@example.com',name:'A · 대량 할인',unitPrice:800000,moq:20,multiple:20,shipping:100000,approved:true,productApproved:true,confirmed:true,quoteExpiry:'2026-10-27',quoteRef:'QT-A-20261024',contractRef:'CTR-A-01',changeTerms:'일괄 발주 · 수량 감액/취소는 별도 합의 필요',shipments:[shipment('A',1,20,'2026-10-30','2026-11-30')]},
- {id:'B',quoteEmail:'supplier-b@example.com',name:'B · 분할 구매',unitPrice:1000000,moq:4,multiple:4,shipping:100000,approved:true,productApproved:true,confirmed:true,quoteExpiry:'2026-10-27',quoteRef:'QT-B-20261024',contractRef:'CTR-B-01',changeTerms:'회차별 4개 확약 · 미출하 일정 변경/취소는 공급업체 서면 동의 필요 (합성 계약)',shipments:[shipment('B',1,4,'2026-10-30','2027-03-31'),shipment('B',2,4,'2026-11-06','2027-03-31'),shipment('B',3,4,'2026-11-13','2027-03-31')]},
- {id:'C',quoteEmail:'supplier-c@example.com',name:'C · 저가 미확약',unitPrice:700000,moq:4,multiple:4,shipping:100000,approved:true,productApproved:true,confirmed:false,quoteExpiry:'2026-10-27',quoteRef:'QT-C-20261024',contractRef:'미체결',changeTerms:'출하 확약·납품실적 미확인 · 확정안 채택 불가',shipments:[shipment('C',1,12,'2026-10-30','2027-03-31',false)]}],
+ vendors:[{id:'A',email:'supplier-a@example.com',name:'A · 대량 할인',unitPrice:800000,moq:20,multiple:20,shipping:100000,approved:true,productApproved:true,confirmed:true,quoteExpiry:'2026-10-27',quoteRef:'QT-A-20261024',contractRef:'CTR-A-01',changeTerms:'일괄 발주 · 수량 감액/취소는 별도 합의 필요',shipments:[shipment('A',1,20,'2026-10-30','2026-11-30')]},
+ {id:'B',email:'supplier-b@example.com',name:'B · 분할 구매',unitPrice:1000000,moq:4,multiple:4,shipping:100000,approved:true,productApproved:true,confirmed:true,quoteExpiry:'2026-10-27',quoteRef:'QT-B-20261024',contractRef:'CTR-B-01',changeTerms:'회차별 4개 확약 · 미출하 일정 변경/취소는 공급업체 서면 동의 필요 (합성 계약)',shipments:[shipment('B',1,4,'2026-10-30','2027-03-31'),shipment('B',2,4,'2026-11-06','2027-03-31'),shipment('B',3,4,'2026-11-13','2027-03-31')]},
+ {id:'C',email:'supplier-c@example.com',name:'C · 저가 미확약',unitPrice:700000,moq:4,multiple:4,shipping:100000,approved:true,productApproved:true,confirmed:false,quoteExpiry:'2026-10-27',quoteRef:'QT-C-20261024',contractRef:'미체결',changeTerms:'출하 확약·납품실적 미확인 · 확정안 채택 불가',shipments:[shipment('C',1,12,'2026-10-30','2027-03-31',false)]}],
  config:{budget:13000000,qcDays:2,qaDays:1,testingPerLot:100000,storagePerVialDay:200,disposalPerVial:20000,safetyBudget:2000000,horizon:'2026-11-30',scenario:'base'},changes:[]
 }}
 export function applyScenario(id:Scenario):ErpData{const d=createSeed();d.config.scenario=id;const b=d.vendors[1];

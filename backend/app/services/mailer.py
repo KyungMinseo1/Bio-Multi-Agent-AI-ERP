@@ -49,34 +49,32 @@ class MailDeliveryError(Exception):
     pass
 
 
-class MailDeliveryUnknown(MailDeliveryError):
-    """SMTP DATA may have been accepted; manual reconciliation is required."""
-
-
-def mail_mode() -> str:
+def recipient_policy():
     mode = setting("BIOFLOW_MAIL_MODE", "preview").strip().lower()
     return mode if mode in {"preview", "test", "live"} else "preview"
 
 
-def example_address(address: str) -> bool:
+def example_address(address):
     domain = address.rsplit("@", 1)[-1].lower()
-    return any(domain == d or domain.endswith("." + d) for d in
+    return any(domain == item or domain.endswith("." + item) for item in
                ("example.com", "example.net", "example.org", "test", "invalid", "localhost"))
 
 
-def delivery_recipient(original: str) -> str:
+def quote_recipient(original, simulation=False):
     original = validate_email_address(original)
-    mode = mail_mode()
-    if mode == "preview":
-        raise MailConfigurationError("미리보기 모드에서는 실제 발송하지 않습니다.")
-    if mode == "test":
+    if simulation:
+        return original
+    policy = recipient_policy()
+    if policy == "preview":
+        raise MailConfigurationError("미리보기 모드입니다. 실제 발송은 비활성화되어 있습니다.")
+    if policy == "test":
         target = setting("BIOFLOW_MAIL_TEST_TO").strip().lower()
         allowed = [x.strip().lower() for x in setting("BIOFLOW_MAIL_TEST_ALLOWLIST").split(",") if x.strip()]
         if not target or target not in allowed:
-            raise MailConfigurationError("허용 테스트 수신 주소를 설정하세요: BIOFLOW_MAIL_TEST_TO / BIOFLOW_MAIL_TEST_ALLOWLIST")
+            raise MailConfigurationError("허용 테스트 수신자 BIOFLOW_MAIL_TEST_TO / BIOFLOW_MAIL_TEST_ALLOWLIST를 설정하세요.")
         target = validate_email_address(target)
         if example_address(target):
-            raise MailConfigurationError("예시 주소는 테스트 수신자로 사용할 수 없습니다.")
+            raise MailConfigurationError("테스트 수신자에는 실제 허용 주소를 설정하세요. 예시 주소는 발송할 수 없습니다.")
         return target
     if example_address(original):
         raise MailConfigurationError("예시 업체 주소로 실제 발송할 수 없습니다. 업체 담당자 이메일을 수정하세요.")
@@ -111,6 +109,8 @@ def public_mail_settings() -> dict:
     return {
         "configured": config.configured,
         "provider": "SMTP",
+        "mcp_configured": bool(setting("GMAIL_MCP_URL")),
+        "simulation_available": True,
         "default_sender": config.default_sender,
         "default_recipient": config.default_recipient,
         "allowed_senders": list(config.allowed_senders),
@@ -119,7 +119,7 @@ def public_mail_settings() -> dict:
         "connection_setup_available": config.host.lower() == "smtp.gmail.com",
         "authentication_required": True,
         "reply_sync": False,
-        "mode": mail_mode(),
+        "recipient_policy": recipient_policy(),
         "test_recipient": setting("BIOFLOW_MAIL_TEST_TO").strip().lower(),
         "test_allowlist": [x.strip().lower() for x in setting("BIOFLOW_MAIL_TEST_ALLOWLIST").split(",") if x.strip()],
     }
@@ -166,7 +166,8 @@ def connect_gmail(app_password: str) -> dict:
 
 def validate_email_address(value: str) -> str:
     address = value.strip()
-    if not EMAIL_RE.fullmatch(address) or any(ch in address for ch in "\r\n,;<>"):
+    local = address.rsplit("@", 1)[0]
+    if not EMAIL_RE.fullmatch(address) or any(ch in address for ch in "\r\n,;<>") or local.startswith(".") or local.endswith(".") or ".." in local:
         raise ValueError("올바른 단일 이메일 주소를 입력하세요.")
     return address.lower()
 
@@ -200,7 +201,7 @@ def send_quote_email(payload: QuoteEmailInput, message_id: str) -> tuple[str, st
     if not config.configured:
         raise MailConfigurationError("SMTP 설정이 완전하지 않습니다.")
     sender = validate_email_address(payload.sender_email)
-    recipient = delivery_recipient(payload.recipient_email)
+    recipient = validate_email_address(payload.recipient_email)
     if sender not in config.allowed_senders:
         raise MailConfigurationError("발신 주소가 서버 허용 목록에 없습니다.")
     if "\r" in payload.subject or "\n" in payload.subject:
@@ -213,40 +214,27 @@ def send_quote_email(payload: QuoteEmailInput, message_id: str) -> tuple[str, st
     msg = EmailMessage()
     msg["From"] = formataddr(("BioFlow 구매팀", sender))
     msg["To"] = recipient
-    msg["Subject"] = ("[BioFlow 테스트] " if mail_mode() == "test" else "") + payload.subject.strip()
+    msg["Subject"] = payload.subject.strip()
     msg["Message-ID"] = message_id
     msg["X-BioFlow-Case"] = payload.case_id
-    msg.set_content((f"테스트 발송 · 원래 업체 주소: {payload.recipient_email}\n공급 확약 요청의 실제 처리 기록이 아닙니다.\n\n" if mail_mode() == "test" else "") + payload.body.strip())
+    msg.set_content(payload.body.strip())
     filename, contents = _attachment(payload)
     msg.add_attachment(contents, maintype="text", subtype="csv", filename=filename)
 
-    transmitting = False
-    accepted = False
     try:
         if config.security == "ssl":
             with smtplib.SMTP_SSL(config.host, config.port, timeout=25, context=ssl.create_default_context()) as server:
                 server.login(config.username, config.password)
-                transmitting = True
                 refused = server.send_message(msg, from_addr=sender, to_addrs=[recipient])
-                accepted = not refused
         else:
             with smtplib.SMTP(config.host, config.port, timeout=25) as server:
                 server.ehlo()
                 server.starttls(context=ssl.create_default_context())
                 server.ehlo()
                 server.login(config.username, config.password)
-                transmitting = True
                 refused = server.send_message(msg, from_addr=sender, to_addrs=[recipient])
-                accepted = not refused
-    except (smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused, smtplib.SMTPDataError):
-        if accepted:
-            return msg["Message-ID"], filename
-        raise MailDeliveryError("smtp_rejected") from None
     except (smtplib.SMTPException, OSError, TimeoutError) as exc:
-        if accepted:
-            return msg["Message-ID"], filename
-        error = MailDeliveryUnknown if transmitting else MailDeliveryError
-        raise error(type(exc).__name__) from None
+        raise MailDeliveryError(type(exc).__name__) from None
     if refused:
         raise MailDeliveryError("recipient_refused")
     return msg["Message-ID"], filename

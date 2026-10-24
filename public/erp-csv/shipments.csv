@@ -1,0 +1,6 @@
+﻿"vendor","id","lot","quantity","arrival","expiry","qcDelay","temperature","qaHold","confirmed","coa","commitment","payment","cashLimit"
+"A","RCPT-A-01","IL7-A-LOT-01","20","2026-10-30","2026-11-30","0","적합","false","true","COA-A-IL7-1","COMMIT-A-20261024-1","2026-10-30","13000000"
+"B","RCPT-B-01","IL7-B-LOT-01","4","2026-10-30","2027-03-31","0","적합","false","true","COA-B-IL7-1","COMMIT-B-20261024-1","2026-10-30","13000000"
+"B","RCPT-B-02","IL7-B-LOT-02","4","2026-11-06","2027-03-31","0","적합","false","true","COA-B-IL7-2","COMMIT-B-20261024-2","2026-11-06","13000000"
+"B","RCPT-B-03","IL7-B-LOT-03","4","2026-11-13","2027-03-31","0","적합","false","true","COA-B-IL7-3","COMMIT-B-20261024-3","2026-11-13","13000000"
+"C","RCPT-C-01","IL7-C-LOT-01","12","2026-10-30","2027-03-31","0","적합","false","false","COA-C-IL7-1","","2026-10-30","13000000"

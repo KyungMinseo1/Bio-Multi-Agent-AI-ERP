@@ -1,0 +1,4 @@
+﻿"id","name","unitPrice","moq","multiple","shipping","approved","productApproved","confirmed","quoteExpiry","quoteRef","contractRef","changeTerms","email","leadDays"
+"A","A · 대량 할인","800000","20","20","100000","true","true","true","2026-10-27","QT-A-20261024","CTR-A-01","일괄 발주 · 수량 감액/취소는 별도 합의 필요","supplier-a@example.com","6"
+"B","B · 분할 구매","1000000","4","4","100000","true","true","true","2026-10-27","QT-B-20261024","CTR-B-01","회차별 4개 확약 · 미출하 일정 변경/취소는 공급업체 서면 동의 필요 (합성 계약)","supplier-b@example.com","6"
+"C","C · 저가 미확약","700000","4","4","100000","true","true","false","2026-10-27","QT-C-20261024","미체결","출하 확약·납품실적 미확인 · 확정안 채택 불가","supplier-c@example.com","6"
